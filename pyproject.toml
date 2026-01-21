@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "codebase-state-manager-mcp"
+version = "0.1.0"
+description = "MCP Server for managing codebase states with Git, Neo4j, and Docker"
+authors = ["Developer <dev@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+GitPython = "^3.1.40"
+neo4j = "^5.24.0"
+SQLAlchemy = "^2.0.35"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+pytest-cov = "^6.0.0"
+bandit = "^1.7.9"
+docker = "^7.1.0"
+mypy = "^1.14.0"
+black = "^24.10.0"
+isort = "^5.13.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
