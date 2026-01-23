@@ -19,9 +19,7 @@ class Neo4jStateRepository(StateRepository):
             session.run(
                 "CREATE CONSTRAINT IF NOT EXISTS FOR (s:State) REQUIRE s.state_number IS UNIQUE"
             )
-            session.run(
-                "CREATE CONSTRAINT IF NOT EXISTS FOR (s:State) REQUIRE s.hash IS UNIQUE"
-            )
+            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (s:State) REQUIRE s.hash IS UNIQUE")
 
     def create(self, state: State) -> bool:
         with self.driver.session() as session:
@@ -62,6 +60,7 @@ class Neo4jStateRepository(StateRepository):
                 file_hashes = s.get("file_hashes", {}) or {}
                 if isinstance(file_hashes, str):
                     import json
+
                     try:
                         file_hashes = json.loads(file_hashes)
                     except json.JSONDecodeError:
@@ -72,20 +71,20 @@ class Neo4jStateRepository(StateRepository):
                     branch_name=s.get("branch_name", ""),
                     git_diff_info=s.get("git_diff_info", ""),
                     hash=s.get("hash", ""),
-                    created_at=datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None,
+                    created_at=(
+                        datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
+                    ),
                     file_hashes=file_hashes,
                 )
             return None
 
     def get_current(self) -> Optional[State]:
         with self.driver.session() as session:
-            result = session.run(
-                """
+            result = session.run("""
                 MATCH (s:State)
                 WITH s.state_number AS sn
                 RETURN MAX(sn) AS max_state
-                """
-            )
+                """)
             record = result.single()
             if record and record["max_state"]:
                 return self.get_by_number(record["max_state"])
@@ -100,6 +99,7 @@ class Neo4jStateRepository(StateRepository):
                 file_hashes = s.get("file_hashes", {}) or {}
                 if isinstance(file_hashes, str):
                     import json
+
                     try:
                         file_hashes = json.loads(file_hashes)
                     except json.JSONDecodeError:
@@ -111,7 +111,9 @@ class Neo4jStateRepository(StateRepository):
                         branch_name=s.get("branch_name", ""),
                         git_diff_info=s.get("git_diff_info", ""),
                         hash=s.get("hash", ""),
-                        created_at=datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None,
+                        created_at=(
+                            datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
+                        ),
                         file_hashes=file_hashes,
                     )
                 )
@@ -195,7 +197,9 @@ class Neo4jTransitionRepository(TransitionRepository):
                     current_state=record["current_state"],
                     next_state=record["next_state"],
                     user_prompt=t.get("user_prompt"),
-                    timestamp=datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None,
+                    timestamp=(
+                        datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None
+                    ),
                 )
             return None
 
@@ -219,7 +223,11 @@ class Neo4jTransitionRepository(TransitionRepository):
                             current_state=record["current_state"],
                             next_state=record["next_state"],
                             user_prompt=t.get("user_prompt"),
-                            timestamp=datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None,
+                            timestamp=(
+                                datetime.fromisoformat(t["timestamp"])
+                                if t.get("timestamp")
+                                else None
+                            ),
                         )
                     )
             return transitions
@@ -245,7 +253,9 @@ class Neo4jTransitionRepository(TransitionRepository):
                         current_state=0,
                         next_state=0,
                         user_prompt=t.get("user_prompt"),
-                        timestamp=datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None,
+                        timestamp=(
+                            datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None
+                        ),
                     )
                 )
             return transitions

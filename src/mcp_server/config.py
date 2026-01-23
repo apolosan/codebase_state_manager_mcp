@@ -27,9 +27,9 @@ class Settings:
         neo4j_password: str = "",
         neo4j_connection_timeout: int = 90,
         sqlite_path: str = "./data/state_manager.db",
-        docker_volume_name: str = "codebase_state_volume",
+        docker_volume_name: str = "./data/codebase_state_volume",
         docker_container_name: str = "codebase-state-manager",
-        volume_path: str = "/tmp/codebase_state_volume",
+        volume_path: str = "./data/codebase_state_volume",
         log_level: str = "INFO",
         rate_limit_enabled: bool = True,
         audit_enabled: bool = True,
@@ -72,7 +72,8 @@ class Settings:
         sqlite_path = os.getenv("SQLITE_PATH", "./data/state_manager.db")
         docker_volume_name = os.getenv("DOCKER_VOLUME_NAME", "codebase_state_volume")
         docker_container_name = os.getenv("DOCKER_CONTAINER_NAME", "codebase-state-manager")
-        volume_path = os.getenv("VOLUME_PATH", "/tmp/codebase_state_volume")
+        volume_path = os.getenv("VOLUME_PATH", "./data/codebase_state_volume")
+        docker_volume_name = volume_path  # Use same path for consistency
         log_level = os.getenv("LOG_LEVEL", "INFO")
         rate_limit_enabled_raw = os.getenv("RATE_LIMIT_ENABLED", "true")
         rate_limit_enabled = rate_limit_enabled_raw.lower() in ("true", "1", "yes")

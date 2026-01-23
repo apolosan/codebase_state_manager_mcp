@@ -1,5 +1,5 @@
-from datetime import datetime
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
@@ -131,15 +131,17 @@ class SQLiteStateRepository(StateRepository):
                         file_hashes = json.loads(sm.file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
-                states.append(State(
-                    state_number=sm.state_number,
-                    user_prompt=sm.user_prompt,
-                    branch_name=sm.branch_name,
-                    git_diff_info=sm.git_diff_info,
-                    hash=sm.hash,
-                    created_at=sm.created_at,
-                    file_hashes=file_hashes,
-                ))
+                states.append(
+                    State(
+                        state_number=sm.state_number,
+                        user_prompt=sm.user_prompt,
+                        branch_name=sm.branch_name,
+                        git_diff_info=sm.git_diff_info,
+                        hash=sm.hash,
+                        created_at=sm.created_at,
+                        file_hashes=file_hashes,
+                    )
+                )
             return states
         finally:
             session.close()
@@ -179,9 +181,7 @@ class SQLiteTransitionRepository(TransitionRepository):
     def create(self, transition: Transition) -> bool:
         session = self.session_factory()
         try:
-            existing = (
-                session.query(TransitionModel).filter_by(id=transition.transition_id).first()
-            )
+            existing = session.query(TransitionModel).filter_by(id=transition.transition_id).first()
             if existing:
                 return True
             transition_model = TransitionModel(

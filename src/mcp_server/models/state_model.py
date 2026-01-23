@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 
 def now_utc() -> datetime:

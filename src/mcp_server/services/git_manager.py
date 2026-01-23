@@ -1,12 +1,12 @@
+import difflib
 import hashlib
+import json
 import os  # nosec: B404
+import shutil
 import signal  # nosec: B404
 import subprocess  # nosec: B404
-import shutil
-import difflib
-import json
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from ..utils.validation import ValidationError, validate_path
 
@@ -30,25 +30,84 @@ GIT_COMMAND_TIMEOUT = 60
 # Based on common binary extensions in software development and Linux
 BINARY_EXTENSIONS = {
     # Archives
-    '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar', '.deb', '.rpm',
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
+    ".deb",
+    ".rpm",
     # Images
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif', '.ico', '.svg', '.webp', '.avif', '.heic',
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".tif",
+    ".ico",
+    ".svg",
+    ".webp",
+    ".avif",
+    ".heic",
     # Audio/Video
-    '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.wav', '.flac', '.aac',
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".mkv",
+    ".wav",
+    ".flac",
+    ".aac",
     # Documents
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".odt",
+    ".ods",
+    ".odp",
     # Binaries/Executables
-    '.exe', '.dll', '.so', '.dylib', '.a', '.o', '.bin', '.out', '.app',
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".a",
+    ".o",
+    ".bin",
+    ".out",
+    ".app",
     # Java
-    '.jar', '.class', '.war', '.ear',
+    ".jar",
+    ".class",
+    ".war",
+    ".ear",
     # Python
-    '.pyc', '.pyo', '.pyd',
+    ".pyc",
+    ".pyo",
+    ".pyd",
     # .NET
-    '.dll', '.exe',  # repeated but ok
+    ".dll",
+    ".exe",  # repeated but ok
     # Databases
-    '.db', '.sqlite', '.sqlite3',
+    ".db",
+    ".sqlite",
+    ".sqlite3",
     # Other binary formats
-    '.iso', '.dmg', '.pkg', '.msi', '.cab', '.tgz', '.tbz2',
+    ".iso",
+    ".dmg",
+    ".pkg",
+    ".msi",
+    ".cab",
+    ".tgz",
+    ".tbz2",
 }
 
 
@@ -192,7 +251,7 @@ class GitManager:
         file_hashes = {}
         for root, dirs, files in os.walk(directory_path):
             # Skip .git directory
-            dirs[:] = [d for d in dirs if d != '.git']
+            dirs[:] = [d for d in dirs if d != ".git"]
             for file in files:
                 file_path = Path(root) / file
 
@@ -201,7 +260,7 @@ class GitManager:
                     continue
 
                 try:
-                    with open(file_path, 'rb') as f:
+                    with open(file_path, "rb") as f:
                         file_hash = hashlib.sha256(f.read()).hexdigest()
                         relative_path = str(file_path.relative_to(directory_path))
                         file_hashes[relative_path] = file_hash
@@ -209,14 +268,22 @@ class GitManager:
                     continue
         return file_hashes
 
-    def compute_changes_since_last_state(self, project_path: Path, last_state_file_hashes: Dict[str, str], volume_codebase_path: Optional[Path] = None) -> Tuple[str, Dict[str, str]]:
+    def compute_changes_since_last_state(
+        self,
+        project_path: Path,
+        last_state_file_hashes: Dict[str, str],
+        volume_codebase_path: Optional[Path] = None,
+    ) -> Tuple[str, Dict[str, str]]:
         """Compute changes between current project and last state."""
         current_hashes = self.get_directory_hashes(project_path)
         delta_hashes = {}
 
         # Find changed/new files
         for file_path, current_hash in current_hashes.items():
-            if file_path not in last_state_file_hashes or last_state_file_hashes[file_path] != current_hash:
+            if (
+                file_path not in last_state_file_hashes
+                or last_state_file_hashes[file_path] != current_hash
+            ):
                 delta_hashes[file_path] = current_hash
 
         # Find deleted files
@@ -245,29 +312,46 @@ class GitManager:
             for file_path in changed_files:
                 project_file = project_path / file_path
                 volume_file = volume_codebase_path / file_path
-                if project_file.exists() and volume_file.exists() and project_file.suffix.lower() not in BINARY_EXTENSIONS:
+                if (
+                    project_file.exists()
+                    and volume_file.exists()
+                    and project_file.suffix.lower() not in BINARY_EXTENSIONS
+                ):
                     try:
-                        with open(volume_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(volume_file, "r", encoding="utf-8", errors="ignore") as f:
                             old_content = f.read().splitlines(keepends=True)
-                        with open(project_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(project_file, "r", encoding="utf-8", errors="ignore") as f:
                             new_content = f.read().splitlines(keepends=True)
-                        diff = list(difflib.unified_diff(old_content, new_content, fromfile=file_path, tofile=file_path, lineterm=''))
+                        diff = list(
+                            difflib.unified_diff(
+                                old_content,
+                                new_content,
+                                fromfile=file_path,
+                                tofile=file_path,
+                                lineterm="",
+                            )
+                        )
                         if diff:
-                            content_diffs[file_path] = '\n'.join(diff)
-                    except Exception:
-                        # Skip if can't read or diff
-                        pass
+                            content_diffs[file_path] = "\n".join(diff)
+                    except Exception as e:
+                        # Log and skip if can't read or diff
+                        import logging
+
+                        logging.getLogger(__name__).debug(f"Could not diff file {file_path}: {e}")
 
         for file_path in new_files:
             project_file = project_path / file_path
             if project_file.exists() and project_file.suffix.lower() not in BINARY_EXTENSIONS:
                 try:
-                    with open(project_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(project_file, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read()
                     if content:
                         content_diffs[file_path] = content
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log and skip if can't read
+                    import logging
+
+                    logging.getLogger(__name__).debug(f"Could not read file {file_path}: {e}")
 
         # For deleted files, no content diff needed
 
@@ -275,15 +359,16 @@ class GitManager:
             "added": new_files,
             "modified": changed_files,
             "deleted": deleted_files,
-            "content_diffs": content_diffs
+            "content_diffs": content_diffs,
         }
 
         diff_info = json.dumps(diff_data)
 
         return diff_info, delta_hashes
 
-    def sync_project_to_volume(self, source_path: Path, volume_path: Path, sync_git: bool = True) -> bool:
+    def sync_project_to_volume(
+        self, source_path: Path, volume_path: Path, sync_git: bool = True
+    ) -> bool:
         """Sync project files to volume."""
         # TODO: Implement proper sync
         return True
-

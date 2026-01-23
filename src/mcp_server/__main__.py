@@ -88,30 +88,34 @@ def main() -> None:
             logger.info(f"  - {tool_name}")
     print("\nMCP Server is ready to accept connections.")
     print("Press Ctrl+C to stop.")
-    
+
     # Start the MCP server
     try:
         logger.info("Importing MCP server app...")
         from .mcp_server import app
+
         logger.info("MCP server app imported successfully")
-        
+
         import mcp
-        mcp_version = getattr(mcp, '__version__', 'unknown')
+
+        mcp_version = getattr(mcp, "__version__", "unknown")
         logger.info(f"MCP library version: {mcp_version}")
-        
+
         logger.info("Starting app.run()...")
         # Enable debug logging for MCP
         import logging
-        logging.getLogger('mcp').setLevel(logging.DEBUG)
-        logging.getLogger('anyio').setLevel(logging.DEBUG)
-        logging.getLogger('asyncio').setLevel(logging.DEBUG)
-        
+
+        logging.getLogger("mcp").setLevel(logging.DEBUG)
+        logging.getLogger("anyio").setLevel(logging.DEBUG)
+        logging.getLogger("asyncio").setLevel(logging.DEBUG)
+
         logger.info("Calling app.run()...")
         app.run()
         logger.info("app.run() returned (server stopped)")
     except Exception as e:
         logger.error(f"MCP Server failed: {e}")
         import traceback
+
         traceback.print_exc()
         raise
 

@@ -14,7 +14,7 @@ class TestSettings:
         assert settings.db_mode == "neo4j"
         assert settings.neo4j_uri == "bolt://localhost:7687"
         assert settings.neo4j_user == "neo4j"
-        assert settings.docker_volume_name == "codebase_state_volume"
+        assert settings.docker_volume_name == "./data/codebase_state_volume"
 
     def test_settings_custom_values(self):
         settings = Settings(
