@@ -14,7 +14,7 @@ from pathlib import Path
 env_path = Path(__file__).parent / ".env"
 if env_path.exists():
     from dotenv import load_dotenv
-    load_dotenv(dotenv_path=str(env_path), override=True)
+    load_dotenv(dotenv_path=str(env_path), override=False)
 
 # Add src to path for imports
 project_root = Path(__file__).parent

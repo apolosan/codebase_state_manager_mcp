@@ -352,7 +352,7 @@
         "LOG_LEVEL": "INFO",
         "RATE_LIMIT_ENABLED": "false",
         "AUDIT_ENABLED": "false",
-        "VOLUME_PATH": "/tmp/codebase"
+        "VOLUME_PATH": "/tmp/tool"
       },
       "enabled": true
     }

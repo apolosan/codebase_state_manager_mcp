@@ -13,7 +13,7 @@ def _load_env_with_override() -> dict:
     """
     env_path = Path(__file__).parent.parent.parent / ".env"
     if env_path.exists():
-        load_dotenv(dotenv_path=str(env_path), override=True)
+        load_dotenv(dotenv_path=str(env_path), override=False)
     return {}
 
 
