@@ -2,217 +2,283 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-295%20passed-green.svg)]()
-[![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-310%20passed-green.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-90%25-green.svg)]()
 [![mypy](https://img.shields.io/badge/mypy-passing-green.svg)]()
 [![Bandit](https://img.shields.io/badge/bandit-clean-green.svg)]()
+[![Status: WIP](https://img.shields.io/badge/status-WIP-yellow.svg)]()
 
-## Status do Desenvolvimento
+A sophisticated Model Context Protocol (MCP) server for managing codebase states with version control, graph database tracking, and containerized execution environments.
 
-**Fase 10 (Review & Iteration): CONCLUÍDA** ✓
+**⚠️ WORK IN PROGRESS (WIP) - This project is actively under development. Features may change, APIs may evolve, and breaking changes are expected during the development phase.**
 
-### Fase 10 - Review & Iteration Completa
+## ⚠️ Important Notice
 
-**Objetivo:** Revisão final, iteration e refinamento antes de deployment.
+**USE AT YOUR OWN RISK**
 
-**Conquistas da Fase 10:**
+This software is provided "as-is" without any warranties or guarantees. Users assume full responsibility for:
 
-1. **Neo4j Integration Tests Habilitados:**
-   - 11/11 testes de integração Neo4j agora passam
-   - Container Docker Neo4j 5.24 configurado para testes
-   - Coverage do neo4j_repository: **31% → 98%** (+67 pontos!)
+- Any data loss or corruption
+- Security vulnerabilities introduced through usage
+- Compliance with applicable laws and regulations
+- Proper backup and recovery procedures
+- Testing in isolated environments before production use
 
-2. **Edge Cases Testados:**
-   - 4 novos testes de edge cases adicionados
-   - get_nonexistent_state
-   - get_current_with_no_states
-   - get_nonexistent_transition
-   - create_transition_exception_handling
+The developers are not liable for any damages, losses, or issues arising from the use of this software.
 
-3. **Coverage Geral:** **90%** (1461 statements, 142 missing)
-   - Melhoria de 85% → 90% (+5 pontos)
-   - neo4j_repository: 98%
-   - sqlite_repository: 94%
-   - __main__.py: 98%
+## 🚀 Features
 
-4. **Test Suite Completa:** **310 testes passando** (100%)
-   - Unit tests: 277
-   - Integration tests: 21 (10 SQLite + 11 Neo4j)
-   - Security tests: 30+
-   - E2E tests: 15
-   - Stress tests: 6
+### Core Capabilities
+- **State Machine Management**: Track codebase evolution through numbered states
+- **Git Integration**: Capture diffs, branches, and commit history
+- **Graph Database Storage**: Neo4j for relationship-based state tracking
+- **SQLite Fallback**: Relational database support when Neo4j is unavailable
+- **Docker Containerization**: Isolated execution environments for git operations
 
-### O que foi implementado nas Fases 7-10:
+### Advanced Features
+- **State Transitions**: Linear and arbitrary transitions between codebase states
+- **Content Hashing**: SHA256 hashing for state integrity verification
+- **Search & Query**: Full-text search across state prompts and diffs
+- **Performance Metrics**: Detailed timing and operation statistics
+- **Structured Logging**: JSON-formatted logs with session context
+- **Security Layers**: Input validation, rate limiting, and audit logging
 
-1. **Sistema de Logging Estruturado** (`src/mcp_server/utils/logging.py`):
-   - JSONFormatter para saída estruturada em JSON
-   - ContextFilter para session_id e state_number
-   - Funções: setup_logging, get_logger, set_session_context, set_state_context
-   - 12 testes unitários
+## 🏗️ Architecture
 
-2. **Módulo de Métricas de Performance** (`src/mcp_server/utils/metrics.py`):
-   - Timer para medição precisa de tempo
-   - MetricsCollector para contadores e estatísticas de timing
-   - PerformanceMonitor para monitoramento de state transitions, DB queries, git operations
-   - Decorator @timed_operation para profiling
-   - 20 testes unitários
+The system follows Clean Architecture principles with clear separation of concerns:
 
-3. **Documentação Completa**:
-   - `CHANGELOG.md` - Histórico de versões seguindo Keep a Changelog
-   - `API_REFERENCE.md` - Documentação completa da API com exemplos
-   - `.git/hooks/pre-commit` - Hook de validação automatizada (black, isort, mypy, bandit, tests)
+```
+MCP Client → Tools Layer → Services Layer → Repositories Layer → Database
+```
 
-4. **Melhorias da Fase 8 (Performance & Monitoring)**:
-   - **Cobertura de código**: `__main__.py` de 0% para 98% (8 novos testes)
-   - **Testes para entry point**: SQLite mode, Neo4j mode, rate limiting, audit logging
-   - **Cleanup de recursos**: conftest.py para gerenciamento de conexões SQLite
-   - **Resource warnings**: Resolvidos com garbage collection automatizado
+### Key Components
+- **MCP Tools Layer**: Protocol interface and tool definitions
+- **Services Layer**: Business logic (StateService, GitManager)
+- **Repositories Layer**: Data access abstraction (Neo4j/SQLite)
+- **Utilities**: Security, logging, metrics, and validation modules
 
-### Resumo das Fases Completas:
+## 📦 Installation
 
-| Fase | Status | Descrição |
-|------|--------|-----------|
-| 1 | ✓ Concluída | Docker Integration |
-| 2 | ✓ Concluída | Database Schema & Models |
-| 3 | ✓ Concluída | Core Tools Implementation |
-| 4 | ✓ Concluída | Getters and Queries |
-| 5 | ✓ Concluída | Security & Best Practices |
-| 6 | ✓ Concluída | Testing Suite |
-| 7 | ✓ Concluída | Project Setup & Environment |
-| 8 | ✓ Concluída | Performance Optimization & Monitoring |
-| 9 | ✓ Concluída | Documentation & Deployment |
-| 10 | ✓ Concluída | Review & Iteration |
+### Prerequisites
+- Python 3.10+
+- Docker & Docker Compose
+- Git
+- Neo4j (optional, for graph database features)
 
-### Estatísticas do Projeto (Fase 10):
-
-- **Testes**: 310 passando (100%)
-  - Unit: 277
-  - Integration: 21 (10 SQLite + 11 Neo4j)
-  - Security: 30+
-  - E2E: 15
-  - Stress: 6
-- **Coverage**: 90% (1461 statements, 142 missing)
-- **neo4j_repository coverage**: 98% (31% → 98%)
-- **Build**: ✅ Sucesso (wheel + sdist)
-- **Security**: Bandit clean (0 vulnerabilities)
-- **Type Safety**: mypy passing (23 source files)
-- **Documentação**: API Reference, CHANGELOG, README
-
-### Como Executar:
-
+### Quick Start
 ```bash
-# Instalar dependências
+# Clone the repository
+git clone https://github.com/apolosan/codebase_state_manager_mcp.git
+cd codebase_state_manager_mcp
+
+# Setup environment
 ./scripts/setup.sh
 
-# Executar todos os testes
+# Run tests to verify installation
+./scripts/run_tests.sh
+```
+
+### Using uv (Recommended)
+```bash
+# Install uv if not present
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Setup with uv
+./scripts/setup.sh --sync
+
+# Run development server
+./scripts/dev.sh
+```
+
+## 🛠️ Usage
+
+### Starting the MCP Server
+```bash
+# Using the launcher script
+python run_mcp_server.py
+
+# Or directly
+python -m src.mcp_server
+```
+
+### Docker Deployment
+```bash
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Test with Docker
+docker-compose -f docker-compose.test.yml up --build
+```
+
+### Available MCP Tools
+
+#### State Management
+- `genesis()` - Create initial state #0
+- `new_state_transition(prompt)` - Create next sequential state
+- `arbitrary_state_transition(target_state, prompt)` - Jump to any existing state
+- `get_current_state_info()` - Get details of current state
+- `get_state_info(state_number)` - Get details of specific state
+- `total_states()` - Count total states
+- `search_states(text)` - Search across state prompts
+
+#### Transition Tracking
+- `get_state_transitions(state_number)` - Get transitions from/to a state
+- `get_transition_info(transition_id)` - Get transition details
+- `track_transitions()` - Monitor recent transitions
+
+## 🔧 Configuration
+
+### Environment Variables
+Create a `.env` file based on `.env.example`:
+
+```bash
+# Database Configuration
+DB_MODE=neo4j  # or sqlite
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=password
+
+# Docker Settings
+DOCKER_VOLUME_NAME=codebase_volume
+VOLUME_PATH=/path/to/volume
+
+# Security Settings
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=60
+```
+
+### Database Modes
+
+#### Neo4j Mode (Recommended)
+```yaml
+# docker-compose.yml
+neo4j:
+  image: neo4j:5.24
+  environment:
+    NEO4J_AUTH: neo4j/password
+  ports:
+    - "7474:7474"  # Browser UI
+    - "7687:7687"  # Bolt protocol
+```
+
+#### SQLite Mode (Fallback)
+Automatically falls back to SQLite when Neo4j is unavailable. Data is stored in `data/state_manager.db`.
+
+## 📊 Testing
+
+### Test Suite
+```bash
+# Run all tests
 ./scripts/run_tests.sh
 
-# Executar validação completa (linting + type check + security)
+# Specific test categories
+./scripts/run_tests.sh unit
+./scripts/run_tests.sh integration
+./scripts/run_tests.sh security
+./scripts/run_tests.sh e2e
+
+# With coverage report
+./scripts/run_tests.sh --coverage
+```
+
+### Test Statistics
+- **310 Total Tests**: 100% passing
+- **90% Code Coverage**: Comprehensive test suite
+- **Security Tests**: Bandit, audit logging, rate limiting
+- **Performance Tests**: Stress testing and metrics validation
+
+## 🔒 Security
+
+### Built-in Security Features
+- **Input Validation**: Sanitization of all user inputs
+- **Rate Limiting**: Token bucket algorithm per client
+- **Audit Logging**: Comprehensive operation tracking
+- **Content Hashing**: SHA256 verification of state integrity
+- **Container Isolation**: Docker-based git operations
+- **No Hardcoded Secrets**: Environment-based configuration only
+
+### Security Testing
+```bash
+# Run security tests
+./scripts/run_tests.sh security
+
+# Bandit security scan
+uv run bandit -r src/
+
+# Custom security validation
+python -m pytest tests/security/ -v
+```
+
+## 📈 Performance
+
+### Monitoring & Metrics
+- **PerformanceMonitor**: Tracks state transitions, DB queries, git operations
+- **MetricsCollector**: Aggregates counters and timing statistics
+- **@timed_operation**: Decorator for automatic performance profiling
+- **Structured Logging**: JSON output for easy parsing and analysis
+
+### Optimization Features
+- **Connection Pooling**: Efficient database connection management
+- **Lazy Loading**: On-demand resource initialization
+- **Caching**: Frequently accessed state information
+- **Async Operations**: Non-blocking I/O where applicable
+
+## 🤝 Contributing
+
+### Development Setup
+```bash
+# Install development dependencies
+./scripts/setup.sh
+
+# Activate pre-commit hooks
 chmod +x .git/hooks/pre-commit
 .git/hooks/pre-commit
 
-# Build do pacote
-python3 -m build
-```
-
-### Arquivos Principais Adicionados:
-
-- `src/mcp_server/utils/logging.py` - Sistema de logging estruturado
-- `src/mcp_server/utils/metrics.py` - Métricas de performance
-- `tests/unit/test_logging.py` - Testes de logging
-- `tests/unit/test_metrics.py` - Testes de métricas
-- `CHANGELOG.md` - Histórico de versões
-- `API_REFERENCE.md` - Documentação da API
-- `.git/hooks/pre-commit` - Hook de validação
-
----
-
-## uv - Gerenciador de Pacotes Python
-
-Este projeto suporta [uv](https://docs.astral.sh/uv/), um gerenciador de pacotes Python extremamente rápido (escrito em Rust).
-
-### Instalação do uv
-
-```bash
-# Usando curl (Linux/macOS)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Ou usando pip
-pip install uv
-```
-
-### Configuração do Ambiente
-
-```bash
-# Instalação completa com dependências de desenvolvimento
-./scripts/setup.sh
-
-# Apenas dependências de produção
-./scripts/setup.sh --prod
-
-# Forçar resincronização
-./scripts/setup.sh --sync
-```
-
-### Comandos Úteis
-
-```bash
-# Ativar virtualenv
-source .venv/bin/activate
-
-# Executar testes
-./scripts/run_tests.sh              # Todos os testes
-./scripts/run_tests.sh unit         # Apenas unitários
-./scripts/run_tests.sh security     # Testes de segurança
-./scripts/run_tests.sh --coverage   # Com coverage
-
-# Executar em modo desenvolvimento
+# Run development server
 ./scripts/dev.sh
-
-# Executar comandos diretamente com uv
-uv run pytest tests/ -v
-uv run python -m src.mcp_server
-uv run mypy src/
-uv run black --check src/
 ```
 
-### uvx - Runner de Ferramentas Temporárias
+### Code Quality
+- **Type Checking**: mypy with strict settings
+- **Code Formatting**: Black and isort
+- **Linting**: Custom pre-commit hooks
+- **Documentation**: Comprehensive docstrings and API references
 
-O [uvx](https://docs.astral.sh/uvx/) permite executar ferramentas Python sem instalá-las globalmente:
+### Testing Guidelines
+1. Write tests for all new functionality
+2. Maintain 90%+ code coverage
+3. Include security tests for sensitive operations
+4. Add integration tests for database interactions
+5. Include performance tests for critical paths
 
-```bash
-# Executar ferramentas temporárias
-uvx ruff check src/                 # Linting
-uvx mypy src/                       # Type checking
-uvx bandit -r src/                  # Security analysis
-uvx pre-commit run --all-files      # Pre-commit hooks
+## 📚 Documentation
 
-# Instalar ferramenta globalmente
-uv tool install ruff
-uv tool run ruff check src/
-```
+### Key Documents
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design decisions
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines and processes
+- [CHANGELOG.md](CHANGELOG.md) - Version history and changes
+- [API Reference](API_REFERENCE.md) - Complete API documentation
 
-### Comparação de Performance
+### Code Documentation
+- Comprehensive docstrings following Google style
+- Type hints for all function signatures
+- Example usage in docstrings
+- Error handling documentation
 
-| Operação | pip | uv | Speedup |
-|----------|-----|-----|---------|
-| Install deps | ~30s | ~0.5s | 60x |
-| Create venv | ~10s | ~0.1s | 100x |
-| Run pytest | - | - | 2-5x faster |
+## 📄 License
 
-*Valores aproximados, variam conforme ambiente.*
+MIT License - see [LICENSE](LICENSE) file for details.
 
-### pyproject.toml
+## ⚠️ Disclaimer (Reiterated)
 
-O projeto suporta configuração via `[tool.uv]`:
+This software is experimental and should be used with extreme caution. Always:
 
-```toml
-[tool.uv]
-managed = true
-package = "."
-```
+1. **Backup your data** before use
+2. **Test in isolated environments** first
+3. **Monitor system resources** during operation
+4. **Review security configurations** regularly
+5. **Assume responsibility** for all usage consequences
 
----
+The developers provide no warranties and accept no liability for any issues arising from the use of this software.
 
-*Desenvolvimento iniciado em 21/01/2026*
-*Timeline estimado: 8-12 semanas*
+**Note:** This is a Work in Progress (WIP) project. The software is in active development and may undergo significant changes, including breaking API modifications, feature additions, and architectural improvements. Users should expect ongoing evolution and should not consider this a stable production-ready solution at this stage.
