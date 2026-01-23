@@ -168,3 +168,5 @@ volumes/
 # Memory MCP
 .aim/
 .opencode/
+
+data/
