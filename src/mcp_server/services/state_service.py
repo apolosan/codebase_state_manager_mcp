@@ -93,7 +93,9 @@ class StateService:
                 branch_name = "codebase-state-machine"
                 diff_info = ""
 
-            file_hashes = self.git_manager.get_directory_hashes(source_path)
+            file_hashes = self.git_manager.get_directory_hashes(
+                source_path, ignore_manager=ignore_manager
+            )
 
             state_0 = State(
                 state_number=0,
@@ -187,14 +189,20 @@ class StateService:
         volume_codebase = Path(self.settings.docker_volume_name) / "codebase"
         project_path = Path.cwd()
 
+        # Create ignore manager to respect .gitignore patterns
+        ignore_manager = IgnoreManager()
+
         last_hashes = getattr(current_state, "file_hashes", {}) or {}
         if not last_hashes and volume_codebase.exists():
-            last_hashes = self.git_manager.get_directory_hashes(volume_codebase)
+            last_hashes = self.git_manager.get_directory_hashes(
+                volume_codebase, ignore_manager=ignore_manager
+            )
         diff_info, delta_hashes = self.git_manager.compute_changes_since_last_state(
             project_path=project_path,
             last_state_file_hashes=last_hashes,
             volume_codebase_path=volume_codebase if volume_codebase.exists() else None,
             is_genesis=False,  # Transitions are not genesis
+            ignore_manager=ignore_manager,
         )
 
         # For delta storage optimization: store only deltas for transition states

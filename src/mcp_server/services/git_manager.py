@@ -6,7 +6,7 @@ import shutil
 import signal  # nosec: B404
 import subprocess  # nosec: B404
 from pathlib import Path
-from typing import Dict, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 from ..utils.validation import ValidationError, validate_path
 
@@ -42,6 +42,12 @@ BINARY_EXTENSIONS = {
     ".rar",
     ".deb",
     ".rpm",
+    ".tgz",
+    ".tbz2",
+    ".txz",
+    ".lz",
+    ".lzma",
+    ".lzo",
     # Images
     ".png",
     ".jpg",
@@ -55,6 +61,9 @@ BINARY_EXTENSIONS = {
     ".webp",
     ".avif",
     ".heic",
+    ".heif",
+    ".jp2",
+    ".j2k",
     # Audio/Video
     ".mp3",
     ".mp4",
@@ -66,6 +75,12 @@ BINARY_EXTENSIONS = {
     ".wav",
     ".flac",
     ".aac",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".m4v",
+    ".webm",
+    ".3gp",
     # Documents
     ".pdf",
     ".doc",
@@ -96,27 +111,276 @@ BINARY_EXTENSIONS = {
     ".pyc",
     ".pyo",
     ".pyd",
+    ".pyo",
     # .NET
     ".dll",
-    ".exe",  # repeated but ok
+    ".exe",
     # Databases
     ".db",
     ".sqlite",
     ".sqlite3",
+    ".db-journal",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".frm",
+    ".myd",
+    ".myi",
+    ".ibd",
+    # Cache and temporary files
+    ".coverage",
+    ".cache",
+    ".swp",
+    ".swo",
+    ".tmp",
+    ".temp",
+    ".log",
+    ".pid",
+    ".lock",
+    # Data serialization and models
+    ".pkl",
+    ".pickle",
+    ".h5",
+    ".hdf5",
+    ".npy",
+    ".npz",
+    ".mat",
+    ".data",
+    ".model",
+    ".weights",
+    ".pt",
+    ".pth",
+    ".onnx",
+    ".pb",
+    ".tflite",
+    ".mlmodel",
+    ".joblib",
+    ".sav",
+    ".dat",
+    ".idx",
+    ".pack",  # Git objects
     # Other binary formats
     ".iso",
     ".dmg",
     ".pkg",
     ".msi",
     ".cab",
-    ".tgz",
-    ".tbz2",
+    ".img",
+    ".toast",
+    ".vcd",
+    ".crx",
+    ".xpi",
+    ".whl",
+    ".egg",
+    # Fonts
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".eot",
+    # Virtual environments and environment files
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+}
+
+# Maximum file size to process (1MB)
+MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
+
+# Directory and file patterns to ignore (similar to .gitignore)
+# These patterns are checked against relative paths
+IGNORE_PATTERNS = {
+    # Version control directories
+    ".git/",
+    ".svn/",
+    ".hg/",
+    # Python cache and virtual environments
+    "__pycache__/",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".coverage",
+    ".tox/",
+    ".nox/",
+    ".venv/",
+    "venv/",
+    "env/",
+    ".env/",
+    ".env.*",
+    # Node.js
+    "node_modules/",
+    ".npm/",
+    ".yarn/",
+    # Build and distribution directories
+    "build/",
+    "dist/",
+    "target/",
+    "out/",
+    ".next/",
+    ".nuxt/",
+    # IDE and editor files
+    ".vscode/",
+    ".idea/",
+    "*.swp",
+    "*.swo",
+    # OS metadata
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    # Temporary files
+    "*.tmp",
+    "*.temp",
+    "*.log",
+    # Coverage and test results
+    "coverage/",
+    "htmlcov/",
+    ".hypothesis/",
+    # Database files (already in BINARY_EXTENSIONS but also ignore directories)
+    "*.db",
+    "*.sqlite",
+    "*.sqlite3",
+    # Docker and volumes
+    ".dockerignore",
+    "Dockerfile",
+    "docker-compose*.yml",
+    "volumes/",
+    # Neo4j data
+    "neo4j/data/",
+    "neo4j/logs/",
+    # Specific to this project
+    "data/",
+    "mcp_data/",
+    ".aim/",
+    ".opencode/",
 }
 
 
 class GitManager:
     def __init__(self, repo_path: Optional[Path] = None) -> None:
         self.repo_path = repo_path
+
+    def _should_ignore_path(
+        self,
+        relative_path: str,
+        is_dir: bool,
+        ignore_manager: Optional["IgnoreManager"] = None,
+        project_path: Optional[Path] = None,
+    ) -> bool:
+        """Check if a path should be ignored based on ignore patterns and binary detection.
+
+        Args:
+            relative_path: Path relative to the directory being scanned
+            is_dir: Whether the path is a directory
+            ignore_manager: Optional IgnoreManager instance to use .gitignore patterns
+            project_path: Path to project root (required if using ignore_manager)
+
+        Returns:
+            True if path should be ignored, False otherwise
+        """
+        import fnmatch
+        import os
+
+        # Normalize path separators to '/' for consistent pattern matching
+        normalized_path = relative_path.replace(os.sep, "/")
+
+        # Always ignore .git directory and anything inside it
+        if ".git" in normalized_path.split("/"):
+            return True
+
+        # If ignore_manager and project_path are provided, use ignore_manager's logic
+        if ignore_manager is not None and project_path is not None:
+            try:
+                ignore_func = ignore_manager.get_ignore_function(project_path)
+                return ignore_func(relative_path, is_dir)
+            except (OSError, IOError, ValueError, RuntimeError):
+                # Fall back to default patterns if ignore_manager fails
+                pass
+
+        # Check ignore patterns
+        for pattern in IGNORE_PATTERNS:
+            # Patterns already use '/' as separator
+            # Check if pattern matches the normalized path
+            if fnmatch.fnmatch(normalized_path, pattern):
+                return True
+            # For directory patterns (ending with /), also match as directory component
+            if pattern.endswith("/") and not is_dir:
+                # Check if pattern (without trailing slash) appears as directory component
+                pattern_dir = pattern.rstrip("/")
+                if pattern_dir in normalized_path.split("/"):
+                    return True
+
+        # Check binary extensions for files
+        if not is_dir:
+            import os.path
+
+            ext = os.path.splitext(relative_path)[1].lower()
+            if ext in BINARY_EXTENSIONS:
+                return True
+
+        return False
+
+    def _is_binary_file(self, file_path: Path) -> bool:
+        """Detect if a file is binary by checking for null bytes or high non-ASCII ratio.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            True if file appears to be binary, False otherwise
+        """
+        try:
+            # Quick check: file size too large
+            if file_path.stat().st_size > MAX_FILE_SIZE:
+                return True
+
+            # Read first 8KB to check for null bytes
+            with open(file_path, "rb") as f:
+                chunk = f.read(8192)
+                if b"\x00" in chunk:
+                    return True
+
+                # Check if chunk is valid UTF-8
+                try:
+                    chunk.decode("utf-8")
+                except UnicodeDecodeError:
+                    # High proportion of non-ASCII may indicate binary
+                    non_ascii_count = sum(1 for byte in chunk if byte > 127)
+                    if non_ascii_count > len(chunk) * 0.3:  # 30% threshold
+                        return True
+        except (OSError, IOError):
+            # If we can't read, assume binary to be safe
+            return True
+
+        return False
+
+    def _should_process_file(
+        self,
+        file_path: Path,
+        relative_path: str,
+        ignore_manager: Optional["IgnoreManager"] = None,
+        project_path: Optional[Path] = None,
+    ) -> bool:
+        """Determine if a file should be processed for hashing and diffing.
+
+        Args:
+            file_path: Absolute path to the file
+            relative_path: Relative path from project root
+            ignore_manager: Optional IgnoreManager instance to use .gitignore patterns
+            project_path: Path to project root (required if using ignore_manager)
+
+        Returns:
+            True if file should be processed, False if it should be ignored
+        """
+        # Check ignore patterns
+        if self._should_ignore_path(
+            relative_path, is_dir=False, ignore_manager=ignore_manager, project_path=project_path
+        ):
+            return False
+
+        # Check binary detection
+        if self._is_binary_file(file_path):
+            return False
+
+        return True
 
     def _run_git_command(
         self,
@@ -194,7 +458,7 @@ class GitManager:
         self,
         source_path: Path,
         volume_path: Path,
-        ignore_manager: Optional["IgnoreManager"] = None,  # type: ignore[name-defined]
+        ignore_manager: Optional["IgnoreManager"] = None,
     ) -> bool:
         import shutil
 
@@ -224,7 +488,7 @@ class GitManager:
                 ignore_func = adapter_ignore
             else:
                 # Fallback to basic .git ignore for backward compatibility
-                ignore_func = shutil.ignore_patterns(".git")
+                ignore_func = shutil.ignore_patterns(".git")  # type: ignore[assignment]
 
             shutil.copytree(
                 validated_source,
@@ -274,23 +538,48 @@ class GitManager:
         except (OSError, ValueError):
             return False
 
-    def get_directory_hashes(self, directory_path: Path) -> Dict[str, str]:
-        """Compute SHA256 hash for each file in directory, excluding binary files."""
+    def get_directory_hashes(
+        self, directory_path: Path, ignore_manager: Optional["IgnoreManager"] = None
+    ) -> Dict[str, str]:
+        """Compute SHA256 hash for each file in directory, excluding binary and ignored files.
+
+        Args:
+            directory_path: Path to directory to scan
+            ignore_manager: Optional IgnoreManager instance to use .gitignore patterns
+
+        Returns:
+            Dictionary mapping relative file paths to SHA256 hashes
+        """
         file_hashes = {}
         for root, dirs, files in os.walk(directory_path):
-            # Skip .git directory
-            dirs[:] = [d for d in dirs if d != ".git"]
+            # Filter directories using ignore patterns
+            dirs[:] = [
+                d
+                for d in dirs
+                if not self._should_ignore_path(
+                    str(Path(root).relative_to(directory_path) / d),
+                    is_dir=True,
+                    ignore_manager=ignore_manager,
+                    project_path=directory_path,
+                )
+            ]
+
             for file in files:
                 file_path = Path(root) / file
+                relative_path = str(file_path.relative_to(directory_path))
 
-                # Skip binary files based on extension
-                if file_path.suffix.lower() in BINARY_EXTENSIONS:
+                # Check if file should be processed
+                if not self._should_process_file(
+                    file_path,
+                    relative_path,
+                    ignore_manager=ignore_manager,
+                    project_path=directory_path,
+                ):
                     continue
 
                 try:
                     with open(file_path, "rb") as f:
                         file_hash = hashlib.sha256(f.read()).hexdigest()
-                        relative_path = str(file_path.relative_to(directory_path))
                         file_hashes[relative_path] = file_hash
                 except (OSError, ValueError):
                     continue
@@ -302,6 +591,7 @@ class GitManager:
         last_state_file_hashes: Dict[str, str],
         volume_codebase_path: Optional[Path] = None,
         is_genesis: bool = False,
+        ignore_manager: Optional["IgnoreManager"] = None,
     ) -> Tuple[str, Dict[str, Optional[str]]]:
         """Compute changes between current project and last state.
 
@@ -309,7 +599,7 @@ class GitManager:
         For transitions, returns deltas: {file_path: new_hash} for changes/adds,
         {file_path: None} for deletions.
         """
-        current_hashes = self.get_directory_hashes(project_path)
+        current_hashes = self.get_directory_hashes(project_path, ignore_manager=ignore_manager)
 
         if is_genesis:
             # For genesis, return full hashes
@@ -359,7 +649,12 @@ class GitManager:
                 if (
                     project_file.exists()
                     and volume_file.exists()
-                    and project_file.suffix.lower() not in BINARY_EXTENSIONS
+                    and self._should_process_file(
+                        project_file,
+                        file_path,
+                        ignore_manager=ignore_manager,
+                        project_path=project_path,
+                    )
                 ):
                     try:
                         with open(volume_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -386,7 +681,12 @@ class GitManager:
         if not is_genesis:
             for file_path in new_files:
                 project_file = project_path / file_path
-                if project_file.exists() and project_file.suffix.lower() not in BINARY_EXTENSIONS:
+                if project_file.exists() and self._should_process_file(
+                    project_file,
+                    file_path,
+                    ignore_manager=ignore_manager,
+                    project_path=project_path,
+                ):
                     try:
                         with open(project_file, "r", encoding="utf-8", errors="ignore") as f:
                             content = f.read()

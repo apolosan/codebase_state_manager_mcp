@@ -42,7 +42,7 @@ class State:
             "file_hash_deltas": self.file_hash_deltas,
         }
 
-    def get_file_hashes(self, state_service=None) -> Dict[str, str]:
+    def get_file_hashes(self, state_service=None):
         """Get full file hashes, reconstructing from deltas if necessary.
 
         For genesis state: returns stored file_hashes directly.
@@ -55,7 +55,9 @@ class State:
         # For transition states, reconstruct if state service is available
         if state_service is not None:
             try:
-                return state_service._reconstruct_file_hashes(self.state_number, self.file_hash_deltas)
+                return state_service._reconstruct_file_hashes(
+                    self.state_number, self.file_hash_deltas
+                )
             except Exception:
                 # Fallback to empty dict if reconstruction fails
                 return {}

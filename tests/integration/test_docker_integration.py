@@ -145,7 +145,7 @@ class TestGitCloneToVolume:
         target = tmp_path / "target"
 
         manager = GitManager()
-        result = manager.clone_to_volume(source, target, exclude_gitignore=True)
+        result = manager.clone_to_volume(source, target)
 
         assert result is True
         assert (target / "file.txt").exists(), "Regular files should be copied"
@@ -163,7 +163,7 @@ class TestDockerEnvironmentVariables:
         monkeypatch.setenv("NEO4J_URI", "bolt://neo4j:7687")
         monkeypatch.setenv("NEO4J_USER", "neo4j")
         monkeypatch.setenv("NEO4J_PASSWORD", "docker_secret")
-        monkeypatch.setenv("DOCKER_VOLUME_NAME", "test_volume")
+        monkeypatch.setenv("VOLUME_PATH", "test_volume")
 
         settings = Settings.from_env()
 

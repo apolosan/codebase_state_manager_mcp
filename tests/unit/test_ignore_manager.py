@@ -166,6 +166,27 @@ class TestGitignoreParser:
         assert ignore_func(".git/config", False) is True
         assert ignore_func("subdir/.git", True) is True
 
+    def test_create_ignore_function_nested_directory_patterns(self):
+        """Test ignore function with nested directory patterns."""
+        patterns = ["node_modules/", "__pycache__/"]
+        parser = GitignoreParser()
+        ignore_func = parser.create_ignore_function(patterns)
+
+        # Should ignore nested node_modules
+        assert ignore_func("node_modules", True) is True
+        assert ignore_func("some/node_modules", True) is True
+        assert ignore_func("deep/nested/node_modules", True) is True
+        assert ignore_func("some/node_modules/package.json", False) is True
+
+        # Should ignore nested __pycache__
+        assert ignore_func("__pycache__", True) is True
+        assert ignore_func("src/__pycache__", True) is True
+        assert ignore_func("src/__pycache__/module.pyc", False) is True
+
+        # Should not ignore unrelated paths
+        assert ignore_func("some", True) is False
+        assert ignore_func("src", True) is False
+
     def test_matches_pattern_wildcards(self):
         """Test pattern matching with wildcards."""
         # Test * wildcard
@@ -186,6 +207,20 @@ class TestGitignoreParser:
         """Test that negation patterns are ignored (simplified implementation)."""
         # Our implementation ignores negation patterns for simplicity
         assert GitignoreParser._matches_pattern("important.log", "!important.log", False) is False
+
+    def test_matches_pattern_nested_directories(self):
+        """Test that directory patterns match nested occurrences."""
+        # Directory patterns should match at any depth
+        assert GitignoreParser._matches_pattern("node_modules", "node_modules/", True) is True
+        assert GitignoreParser._matches_pattern("node_modules/express", "node_modules/", True) is True
+        assert GitignoreParser._matches_pattern("some/node_modules", "node_modules/", True) is True
+        assert GitignoreParser._matches_pattern("some/node_modules/package.json", "node_modules/", False) is True
+        assert GitignoreParser._matches_pattern("deep/nested/path/node_modules", "node_modules/", True) is True
+        assert GitignoreParser._matches_pattern("deep/nested/path/node_modules/lib", "node_modules/", True) is True
+
+        # Should not match unrelated directories
+        assert GitignoreParser._matches_pattern("some", "node_modules/", True) is False
+        assert GitignoreParser._matches_pattern("some/deep", "node_modules/", True) is False
 
 
 class TestIgnoreManager:

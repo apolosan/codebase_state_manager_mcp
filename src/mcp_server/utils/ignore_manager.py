@@ -209,10 +209,11 @@ class GitignoreParser:
                 return False
             return True
 
-        # For directory patterns, check if path is inside the directory
+        # For directory patterns, check if pattern appears as directory component anywhere in path
         if is_directory_pattern:
-            escaped_pattern = re.escape(pattern + "/")
-            if re.match(f"{escaped_pattern}.*", path, re.IGNORECASE):
+            path_parts = path.split("/")
+            pattern_name = pattern  # pattern already has / removed
+            if pattern_name in path_parts:
                 return True
 
         return False
