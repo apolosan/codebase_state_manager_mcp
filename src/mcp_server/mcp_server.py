@@ -142,15 +142,15 @@ async def search_states_tool(text: str) -> dict:
     )
     return result
 
+
 @app.tool()
 async def arbitrary_state_transition_tool(next_state: int, user_prompt: str | None = None) -> dict:
     """Performs an arbitrary state transition from the current state to a given next_state number."""
     result = arbitrary_state_transition(
-        state_service=state_service,
-        next_state=next_state,
-        user_prompt=user_prompt
+        state_service=state_service, next_state=next_state, user_prompt=user_prompt
     )
     return result
+
 
 @app.tool()
 async def get_state_info_tool(state: int) -> dict:
@@ -158,11 +158,13 @@ async def get_state_info_tool(state: int) -> dict:
     result = get_state_info(state_service=state_service, state=state)
     return result
 
+
 @app.tool()
 async def get_state_transitions_tool(state: int) -> dict:
     """Get transitions for a specific state."""
     result = get_state_transitions(state_service=state_service, state=state)
     return result
+
 
 @app.tool()
 async def get_transition_info_tool(transition_id: str) -> dict:
@@ -170,11 +172,13 @@ async def get_transition_info_tool(transition_id: str) -> dict:
     result = get_transition_info(state_service=state_service, transition_id=transition_id)
     return result
 
+
 @app.tool()
 async def track_transitions_tool() -> dict:
     """Get the last 5 transitions."""
     result = track_transitions(state_service=state_service)
     return result
+
 
 @app.tool()
 async def get_current_state_transitions_tool() -> dict:

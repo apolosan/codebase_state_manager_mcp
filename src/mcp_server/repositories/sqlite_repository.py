@@ -25,6 +25,7 @@ class StateModel(Base):
     hash = Column(String(64), unique=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     file_hashes = Column(Text, nullable=True)
+    file_hash_deltas = Column(Text, nullable=True)
 
 
 class TransitionModel(Base):
@@ -53,6 +54,9 @@ class SQLiteStateRepository(StateRepository):
             if existing:
                 return True
             file_hashes_json = json.dumps(state.file_hashes) if state.file_hashes else None
+            file_hash_deltas_json = (
+                json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
+            )
             state_model = StateModel(
                 state_number=state.state_number,
                 user_prompt=state.user_prompt,
@@ -61,6 +65,7 @@ class SQLiteStateRepository(StateRepository):
                 hash=state.hash,
                 created_at=state.created_at,
                 file_hashes=file_hashes_json,
+                file_hash_deltas=file_hash_deltas_json,
             )
             session.add(state_model)
             session.commit()
@@ -131,6 +136,12 @@ class SQLiteStateRepository(StateRepository):
                         file_hashes = json.loads(sm.file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
+                file_hash_deltas = {}
+                if sm.file_hash_deltas:
+                    try:
+                        file_hash_deltas = json.loads(sm.file_hash_deltas)
+                    except json.JSONDecodeError:
+                        file_hash_deltas = {}
                 states.append(
                     State(
                         state_number=sm.state_number,
@@ -140,6 +151,7 @@ class SQLiteStateRepository(StateRepository):
                         hash=sm.hash,
                         created_at=sm.created_at,
                         file_hashes=file_hashes,
+                        file_hash_deltas=file_hash_deltas,
                     )
                 )
             return states

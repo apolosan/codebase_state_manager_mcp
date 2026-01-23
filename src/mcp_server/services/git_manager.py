@@ -273,42 +273,58 @@ class GitManager:
         project_path: Path,
         last_state_file_hashes: Dict[str, str],
         volume_codebase_path: Optional[Path] = None,
-    ) -> Tuple[str, Dict[str, str]]:
-        """Compute changes between current project and last state."""
+        is_genesis: bool = False,
+    ) -> Tuple[str, Dict[str, Optional[str]]]:
+        """Compute changes between current project and last state.
+
+        For genesis (state 0), returns full current hashes.
+        For transitions, returns deltas: {file_path: new_hash} for changes/adds,
+        {file_path: None} for deletions.
+        """
         current_hashes = self.get_directory_hashes(project_path)
-        delta_hashes = {}
 
-        # Find changed/new files
-        for file_path, current_hash in current_hashes.items():
-            if (
-                file_path not in last_state_file_hashes
-                or last_state_file_hashes[file_path] != current_hash
-            ):
-                delta_hashes[file_path] = current_hash
+        if is_genesis:
+            # For genesis, return full hashes
+            delta_hashes = {path: hash_val for path, hash_val in current_hashes.items()}
+        else:
+            # For transitions, compute deltas
+            delta_hashes = {}
 
-        # Find deleted files
-        for file_path in last_state_file_hashes:
-            if file_path not in current_hashes:
-                delta_hashes[file_path] = ""  # Mark as deleted
+            # Find changed/new files
+            for file_path, current_hash in current_hashes.items():
+                if (
+                    file_path not in last_state_file_hashes
+                    or last_state_file_hashes[file_path] != current_hash
+                ):
+                    delta_hashes[file_path] = current_hash
+
+            # Find deleted files
+            for file_path in last_state_file_hashes:
+                if file_path not in current_hashes:
+                    delta_hashes[file_path] = None  # type: ignore[assignment]  # Mark as deleted
 
         # Generate diff info based on changed files
         changed_files = []
         new_files = []
         deleted_files = []
 
-        for file_path, current_hash in current_hashes.items():
-            if file_path not in last_state_file_hashes:
-                new_files.append(file_path)
-            elif last_state_file_hashes[file_path] != current_hash:
-                changed_files.append(file_path)
+        if not is_genesis:
+            for file_path, current_hash in current_hashes.items():
+                if file_path not in last_state_file_hashes:
+                    new_files.append(file_path)
+                elif last_state_file_hashes[file_path] != current_hash:
+                    changed_files.append(file_path)
 
-        for file_path in last_state_file_hashes:
-            if file_path not in current_hashes:
-                deleted_files.append(file_path)
+            for file_path in last_state_file_hashes:
+                if file_path not in current_hashes:
+                    deleted_files.append(file_path)
+        else:
+            # For genesis, all files are "new"
+            new_files = list(current_hashes.keys())
 
         # Generate content diffs
         content_diffs = {}
-        if volume_codebase_path and volume_codebase_path.exists():
+        if volume_codebase_path and volume_codebase_path.exists() and not is_genesis:
             for file_path in changed_files:
                 project_file = project_path / file_path
                 volume_file = volume_codebase_path / file_path
@@ -339,21 +355,20 @@ class GitManager:
 
                         logging.getLogger(__name__).debug(f"Could not diff file {file_path}: {e}")
 
-        for file_path in new_files:
-            project_file = project_path / file_path
-            if project_file.exists() and project_file.suffix.lower() not in BINARY_EXTENSIONS:
-                try:
-                    with open(project_file, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    if content:
-                        content_diffs[file_path] = content
-                except Exception as e:
-                    # Log and skip if can't read
-                    import logging
+        if not is_genesis:
+            for file_path in new_files:
+                project_file = project_path / file_path
+                if project_file.exists() and project_file.suffix.lower() not in BINARY_EXTENSIONS:
+                    try:
+                        with open(project_file, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        if content:
+                            content_diffs[file_path] = content
+                    except Exception as e:
+                        # Log and skip if can't read
+                        import logging
 
-                    logging.getLogger(__name__).debug(f"Could not read file {file_path}: {e}")
-
-        # For deleted files, no content diff needed
+                        logging.getLogger(__name__).debug(f"Could not read file {file_path}: {e}")
 
         diff_data = {
             "added": new_files,
@@ -364,7 +379,7 @@ class GitManager:
 
         diff_info = json.dumps(diff_data)
 
-        return diff_info, delta_hashes
+        return diff_info, delta_hashes  # type: ignore[return-value]
 
     def sync_project_to_volume(
         self, source_path: Path, volume_path: Path, sync_git: bool = True

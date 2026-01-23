@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from ..config import Settings
 from ..models.state_model import State, Transition
@@ -98,6 +98,9 @@ class StateService:
                 git_diff_info=diff_info,
                 hash="",
                 file_hashes=file_hashes,
+                file_hash_deltas={
+                    k: v for k, v in file_hashes.items()
+                },  # Genesis stores full hashes as deltas too
             )
             state_0.hash = generate_state_hash(
                 state_0.user_prompt,
@@ -126,6 +129,7 @@ class StateService:
         diff_info: str,
         current_state: State,
         file_hashes: dict,
+        file_hash_deltas: dict,
     ) -> tuple[bool, Optional[State], str]:
         try:
             sanitized_prompt = sanitize_prompt(user_prompt)
@@ -141,6 +145,7 @@ class StateService:
             git_diff_info=diff_info,
             hash="",
             file_hashes=file_hashes,
+            file_hash_deltas=file_hash_deltas,  # Store only deltas
         )
         new_state.hash = generate_state_hash(
             new_state.user_prompt,
@@ -185,16 +190,18 @@ class StateService:
             project_path=project_path,
             last_state_file_hashes=last_hashes,
             volume_codebase_path=volume_codebase if volume_codebase.exists() else None,
+            is_genesis=False,  # Transitions are not genesis
         )
 
-        # Optimization: Merge the delta hashes with the previous state's hashes to form the new full map,
-        # ensuring only changed/new files are re-evaluated/stored in the delta from git_manager,
-        # while the State object itself maintains the complete set (for future base comparison).
-        current_hashes = last_hashes.copy()
-        current_hashes.update(delta_hashes)
+        # For delta storage: store only deltas, reconstruct full hashes on demand
+        current_hashes = self._reconstruct_file_hashes(current_state.state_number - 1, delta_hashes)
 
         success, new_state, message = self._create_state_and_transition_atomic(
-            user_prompt, diff_info, current_state, current_hashes
+            user_prompt,
+            diff_info,
+            current_state,
+            current_hashes,
+            {},  # Empty deltas for arbitrary transition
         )
 
         if success and new_state:
@@ -324,6 +331,70 @@ class StateService:
             return None, f"Transition {transition_id} not found"
         except ValueError:
             return None, f"Invalid transition ID format: {transition_id}"
+
+    def _reconstruct_file_hashes(
+        self, from_state: int, deltas: Dict[str, Optional[str]]
+    ) -> Dict[str, str]:
+        """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
+        # Start with genesis state hashes
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        current_hashes = dict(genesis_state.file_hashes)
+
+        # Apply deltas from state 1 up to from_state
+        for state_num in range(1, from_state + 1):
+            state = self.state_repo.get_by_number(state_num)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                # Apply deltas: update/add files, remove deleted ones
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        current_hashes.pop(file_path, None)
+                    else:
+                        current_hashes[file_path] = hash_val
+
+        return current_hashes
+        """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
+        # Start with genesis state hashes
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        current_hashes = dict(genesis_state.file_hashes)
+
+        # Apply deltas from state 1 up to from_state
+        for state_num in range(1, from_state + 1):
+            state = self.state_repo.get_by_number(state_num)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                # Apply deltas: update/add files, remove deleted ones
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        current_hashes.pop(file_path, None)
+                    else:
+                        current_hashes[file_path] = hash_val
+
+        return current_hashes
+        """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
+        # Start with genesis state hashes
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        current_hashes = dict(genesis_state.file_hashes)
+
+        # Apply deltas from state 1 up to from_state
+        for state_num in range(1, from_state + 1):
+            state = self.state_repo.get_by_number(state_num)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                # Apply deltas: update/add files, remove deleted ones
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        current_hashes.pop(file_path, None)
+                    else:
+                        current_hashes[file_path] = hash_val
+
+        return current_hashes
 
     def track_transitions(self) -> tuple[list, str]:
         if not is_initialized(self.settings.docker_volume_name):

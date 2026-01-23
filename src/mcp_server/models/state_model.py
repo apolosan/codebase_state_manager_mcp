@@ -17,6 +17,7 @@ class State:
         hash: str,
         created_at: Optional[datetime] = None,
         file_hashes: Optional[Dict[str, str]] = None,
+        file_hash_deltas: Optional[Dict[str, Optional[str]]] = None,
     ) -> None:
         self.state_number = state_number
         self.user_prompt = user_prompt
@@ -25,6 +26,7 @@ class State:
         self.hash = hash
         self.created_at = created_at or now_utc()
         self.file_hashes = file_hashes or {}
+        self.file_hash_deltas = file_hash_deltas or {}
 
     def to_dict(self) -> dict:
         return {
@@ -35,6 +37,7 @@ class State:
             "hash": self.hash,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "file_hashes": self.file_hashes,
+            "file_hash_deltas": self.file_hash_deltas,
         }
 
     @classmethod
@@ -53,6 +56,7 @@ class State:
             hash=data["hash"],
             created_at=created_at,
             file_hashes=data.get("file_hashes", {}),
+            file_hash_deltas=data.get("file_hash_deltas", {}),
         )
 
 

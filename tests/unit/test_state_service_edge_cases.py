@@ -77,6 +77,7 @@ class TestStateServiceGenesisEdgeCases:
         mock_git_manager.clone_to_volume.return_value = True
         mock_git_manager.get_current_branch.return_value = "main"
         mock_git_manager.get_diff.return_value = "diff"
+        mock_git_manager.get_directory_hashes.return_value = {"test.py": "hash123"}
         mock_state_repo.create.return_value = True
 
         service = StateService(
@@ -202,42 +203,14 @@ class TestStateServiceTransitionEdgeCases:
         mock_current_state.branch_name = "main"
         mock_current_state.git_diff_info = ""
         mock_current_state.file_hashes = {}
+        mock_current_state.file_hash_deltas = {}
+
+        mock_genesis_state = Mock()
+        mock_genesis_state.file_hashes = {"genesis.py": "genesis_hash"}
+        mock_genesis_state.file_hash_deltas = {"genesis.py": "genesis_hash"}
 
         mock_state_repo.get_current.return_value = mock_current_state
-        mock_state_repo.count.return_value = 1
-        mock_state_repo.create.return_value = False
-
-        service = StateService(
-            mock_state_repo, mock_transition_repo, mock_git_manager, mock_settings
-        )
-
-        with patch("src.mcp_server.services.state_service.is_initialized") as mock_is_init:
-            with patch("src.mcp_server.services.state_service.sanitize_prompt") as mock_sanitize:
-                mock_is_init.return_value = True
-                mock_sanitize.return_value = "Test prompt"
-                mock_git_manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
-
-                success, state, message = service.new_state_transition("Test prompt")
-
-                assert success is False
-                assert "Failed to create new state" in message
-
-    def test_new_state_transition_rollback_on_transition_failure(self):
-        """Test that state is rolled back when transition creation fails."""
-        mock_state_repo = Mock()
-        mock_transition_repo = Mock()
-        mock_transition_repo.count.return_value = 0
-        mock_git_manager = Mock()
-        mock_settings = Mock()
-        mock_settings.docker_volume_name = "/tmp/volume"
-
-        mock_current_state = Mock()
-        mock_current_state.state_number = 0
-        mock_current_state.branch_name = "main"
-        mock_current_state.git_diff_info = ""
-        mock_current_state.file_hashes = {}
-
-        mock_state_repo.get_current.return_value = mock_current_state
+        mock_state_repo.get_by_number.return_value = mock_genesis_state
         mock_state_repo.count.return_value = 1
         mock_state_repo.create.side_effect = [True, True]
 

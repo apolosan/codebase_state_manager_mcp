@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import List, Optional
 
@@ -29,10 +30,11 @@ class Neo4jStateRepository(StateRepository):
                     MERGE (s:State {state_number: $state_number})
                     SET s.user_prompt = $user_prompt,
                         s.branch_name = $branch_name,
-                        s.git_diff_info = $git_diff_info,
-                        s.hash = $hash,
-                        s.created_at = $created_at
-                    RETURN s
+                     s.git_diff_info = $git_diff_info,
+                         s.hash = $hash,
+                         s.created_at = $created_at,
+                         s.file_hash_deltas = $file_hash_deltas
+                     RETURN s
                     """,
                     state_number=state.state_number,
                     user_prompt=state.user_prompt,
@@ -40,6 +42,9 @@ class Neo4jStateRepository(StateRepository):
                     git_diff_info=state.git_diff_info,
                     hash=state.hash,
                     created_at=state.created_at.isoformat() if state.created_at else None,
+                    file_hash_deltas=(
+                        json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
+                    ),
                 )
                 return result.single() is not None
             except Exception:
@@ -59,22 +64,29 @@ class Neo4jStateRepository(StateRepository):
                 s = record["s"]
                 file_hashes = s.get("file_hashes", {}) or {}
                 if isinstance(file_hashes, str):
-                    import json
-
                     try:
                         file_hashes = json.loads(file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
-                return State(
-                    state_number=s.get("state_number", 0),
-                    user_prompt=s.get("user_prompt", ""),
-                    branch_name=s.get("branch_name", ""),
-                    git_diff_info=s.get("git_diff_info", ""),
-                    hash=s.get("hash", ""),
-                    created_at=(
-                        datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
-                    ),
-                    file_hashes=file_hashes,
+                file_hash_deltas = s.get("file_hash_deltas", {}) or {}
+                if isinstance(file_hash_deltas, str):
+                    try:
+                        file_hash_deltas = json.loads(file_hash_deltas)
+                    except json.JSONDecodeError:
+                        file_hash_deltas = {}
+                states.append(
+                    State(
+                        state_number=s.get("state_number", 0),
+                        user_prompt=s.get("user_prompt", ""),
+                        branch_name=s.get("branch_name", ""),
+                        git_diff_info=s.get("git_diff_info", ""),
+                        hash=s.get("hash", ""),
+                        created_at=(
+                            datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
+                        ),
+                        file_hashes=file_hashes,
+                        file_hash_deltas=file_hash_deltas,
+                    )
                 )
             return None
 
@@ -98,12 +110,16 @@ class Neo4jStateRepository(StateRepository):
                 s = record["s"]
                 file_hashes = s.get("file_hashes", {}) or {}
                 if isinstance(file_hashes, str):
-                    import json
-
                     try:
                         file_hashes = json.loads(file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
+                file_hash_deltas = s.get("file_hash_deltas", {}) or {}
+                if isinstance(file_hash_deltas, str):
+                    try:
+                        file_hash_deltas = json.loads(file_hash_deltas)
+                    except json.JSONDecodeError:
+                        file_hash_deltas = {}
                 states.append(
                     State(
                         state_number=s.get("state_number", 0),
@@ -115,6 +131,7 @@ class Neo4jStateRepository(StateRepository):
                             datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
                         ),
                         file_hashes=file_hashes,
+                        file_hash_deltas=file_hash_deltas,
                     )
                 )
             return states
