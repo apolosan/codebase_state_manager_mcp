@@ -25,7 +25,9 @@ class State:
         self.git_diff_info = git_diff_info
         self.hash = hash
         self.created_at = created_at or now_utc()
-        self.file_hashes = file_hashes or {}
+        # For genesis state (0): store full hashes
+        # For transition states (1+): store None to save space, reconstruct on-demand
+        self.file_hashes = file_hashes
         self.file_hash_deltas = file_hash_deltas or {}
 
     def to_dict(self) -> dict:
@@ -39,6 +41,26 @@ class State:
             "file_hashes": self.file_hashes,
             "file_hash_deltas": self.file_hash_deltas,
         }
+
+    def get_file_hashes(self, state_service=None) -> Dict[str, str]:
+        """Get full file hashes, reconstructing from deltas if necessary.
+
+        For genesis state: returns stored file_hashes directly.
+        For transition states: reconstructs from genesis + deltas if state_service provided,
+        otherwise returns empty dict.
+        """
+        if self.state_number == 0 or self.file_hashes is not None:
+            return self.file_hashes or {}
+
+        # For transition states, reconstruct if state service is available
+        if state_service is not None:
+            try:
+                return state_service._reconstruct_file_hashes(self.state_number, self.file_hash_deltas)
+            except Exception:
+                # Fallback to empty dict if reconstruction fails
+                return {}
+
+        return {}
 
     @classmethod
     def from_dict(cls, data: dict) -> "State":
@@ -55,7 +77,7 @@ class State:
             git_diff_info=data["git_diff_info"],
             hash=data["hash"],
             created_at=created_at,
-            file_hashes=data.get("file_hashes", {}),
+            file_hashes=data.get("file_hashes"),  # Can be None for transition states
             file_hash_deltas=data.get("file_hash_deltas", {}),
         )
 

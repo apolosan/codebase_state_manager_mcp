@@ -7,6 +7,7 @@ from ..repositories.abstract_repositories import StateRepository, TransitionRepo
 from ..services.git_manager import GitManager, GitOperationError
 from ..utils.audit import get_audit_logger
 from ..utils.hash import generate_state_hash
+from ..utils.ignore_manager import IgnoreManager
 from ..utils.init_manager import is_initialized, set_initialized
 from ..utils.security import RateLimitExceeded, get_rate_limiter
 from ..utils.validation import (
@@ -71,8 +72,11 @@ class StateService:
             Path(volume_path).mkdir(parents=True, exist_ok=True)
             target_path = Path(volume_path) / "codebase"
 
+            # Initialize ignore manager for intelligent filtering
+            ignore_manager = IgnoreManager()
+
             if self.git_manager.is_git_repo(source_path):
-                if not self.git_manager.clone_to_volume(source_path, target_path):
+                if not self.git_manager.clone_to_volume(source_path, target_path, ignore_manager):
                     return False, None, "Failed to clone repository to volume"
                 if not self.git_manager.init_repo(target_path):
                     return False, None, "Failed to initialize git repository in volume"
@@ -81,7 +85,7 @@ class StateService:
                 )
                 diff_info = current_diff or ""
             else:
-                if not self.git_manager.clone_to_volume(source_path, target_path):
+                if not self.git_manager.clone_to_volume(source_path, target_path, ignore_manager):
                     return False, None, "Failed to clone files to volume"
                 if not self.git_manager.init_repo(target_path):
                     return False, None, "Failed to initialize git repository"
@@ -128,7 +132,7 @@ class StateService:
         user_prompt: str,
         diff_info: str,
         current_state: State,
-        file_hashes: dict,
+        file_hashes: Optional[dict],
         file_hash_deltas: dict,
     ) -> tuple[bool, Optional[State], str]:
         try:
@@ -193,15 +197,14 @@ class StateService:
             is_genesis=False,  # Transitions are not genesis
         )
 
-        # For delta storage: store only deltas, reconstruct full hashes on demand
-        current_hashes = self._reconstruct_file_hashes(current_state.state_number - 1, delta_hashes)
-
+        # For delta storage optimization: store only deltas for transition states
+        # Don't reconstruct full hashes here - store deltas only
         success, new_state, message = self._create_state_and_transition_atomic(
             user_prompt,
             diff_info,
             current_state,
-            current_hashes,
-            {},  # Empty deltas for arbitrary transition
+            None,  # No full hashes for transition states (save space)
+            delta_hashes,  # Store actual deltas for optimization
         )
 
         if success and new_state:
@@ -341,47 +344,7 @@ class StateService:
         if not genesis_state:
             raise StateNotFoundError("Genesis state not found")
 
-        current_hashes = dict(genesis_state.file_hashes)
-
-        # Apply deltas from state 1 up to from_state
-        for state_num in range(1, from_state + 1):
-            state = self.state_repo.get_by_number(state_num)
-            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
-                # Apply deltas: update/add files, remove deleted ones
-                for file_path, hash_val in state.file_hash_deltas.items():
-                    if hash_val is None:
-                        current_hashes.pop(file_path, None)
-                    else:
-                        current_hashes[file_path] = hash_val
-
-        return current_hashes
-        """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
-        # Start with genesis state hashes
-        genesis_state = self.state_repo.get_by_number(0)
-        if not genesis_state:
-            raise StateNotFoundError("Genesis state not found")
-
-        current_hashes = dict(genesis_state.file_hashes)
-
-        # Apply deltas from state 1 up to from_state
-        for state_num in range(1, from_state + 1):
-            state = self.state_repo.get_by_number(state_num)
-            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
-                # Apply deltas: update/add files, remove deleted ones
-                for file_path, hash_val in state.file_hash_deltas.items():
-                    if hash_val is None:
-                        current_hashes.pop(file_path, None)
-                    else:
-                        current_hashes[file_path] = hash_val
-
-        return current_hashes
-        """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
-        # Start with genesis state hashes
-        genesis_state = self.state_repo.get_by_number(0)
-        if not genesis_state:
-            raise StateNotFoundError("Genesis state not found")
-
-        current_hashes = dict(genesis_state.file_hashes)
+        current_hashes = dict(genesis_state.file_hashes or {})
 
         # Apply deltas from state 1 up to from_state
         for state_num in range(1, from_state + 1):

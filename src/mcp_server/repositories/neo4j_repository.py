@@ -62,31 +62,33 @@ class Neo4jStateRepository(StateRepository):
             record = result.single()
             if record:
                 s = record["s"]
-                file_hashes = s.get("file_hashes", {}) or {}
-                if isinstance(file_hashes, str):
-                    try:
-                        file_hashes = json.loads(file_hashes)
-                    except json.JSONDecodeError:
-                        file_hashes = {}
+                file_hashes = s.get("file_hashes")
+                if file_hashes is not None:
+                    if isinstance(file_hashes, str):
+                        try:
+                            file_hashes = json.loads(file_hashes)
+                        except json.JSONDecodeError:
+                            file_hashes = {}
+                    else:
+                        file_hashes = file_hashes or {}
+                # file_hashes can be None for transition states
                 file_hash_deltas = s.get("file_hash_deltas", {}) or {}
                 if isinstance(file_hash_deltas, str):
                     try:
                         file_hash_deltas = json.loads(file_hash_deltas)
                     except json.JSONDecodeError:
                         file_hash_deltas = {}
-                states.append(
-                    State(
-                        state_number=s.get("state_number", 0),
-                        user_prompt=s.get("user_prompt", ""),
-                        branch_name=s.get("branch_name", ""),
-                        git_diff_info=s.get("git_diff_info", ""),
-                        hash=s.get("hash", ""),
-                        created_at=(
-                            datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
-                        ),
-                        file_hashes=file_hashes,
-                        file_hash_deltas=file_hash_deltas,
-                    )
+                return State(
+                    state_number=s.get("state_number", 0),
+                    user_prompt=s.get("user_prompt", ""),
+                    branch_name=s.get("branch_name", ""),
+                    git_diff_info=s.get("git_diff_info", ""),
+                    hash=s.get("hash", ""),
+                    created_at=(
+                        datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None
+                    ),
+                    file_hashes=file_hashes,
+                    file_hash_deltas=file_hash_deltas,
                 )
             return None
 
@@ -108,12 +110,16 @@ class Neo4jStateRepository(StateRepository):
             states = []
             for record in result:
                 s = record["s"]
-                file_hashes = s.get("file_hashes", {}) or {}
-                if isinstance(file_hashes, str):
-                    try:
-                        file_hashes = json.loads(file_hashes)
-                    except json.JSONDecodeError:
-                        file_hashes = {}
+                file_hashes = s.get("file_hashes")
+                if file_hashes is not None:
+                    if isinstance(file_hashes, str):
+                        try:
+                            file_hashes = json.loads(file_hashes)
+                        except json.JSONDecodeError:
+                            file_hashes = {}
+                    else:
+                        file_hashes = file_hashes or {}
+                # file_hashes can be None for transition states
                 file_hash_deltas = s.get("file_hash_deltas", {}) or {}
                 if isinstance(file_hash_deltas, str):
                     try:

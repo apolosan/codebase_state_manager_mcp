@@ -6,9 +6,12 @@ import shutil
 import signal  # nosec: B404
 import subprocess  # nosec: B404
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, TYPE_CHECKING
 
 from ..utils.validation import ValidationError, validate_path
+
+if TYPE_CHECKING:
+    from ..utils.ignore_manager import IgnoreManager
 
 
 class GitOperationError(Exception):
@@ -188,7 +191,10 @@ class GitManager:
         return diff_output
 
     def clone_to_volume(
-        self, source_path: Path, volume_path: Path, exclude_gitignore: bool = True
+        self,
+        source_path: Path,
+        volume_path: Path,
+        ignore_manager: Optional["IgnoreManager"] = None,  # type: ignore[name-defined]
     ) -> bool:
         import shutil
 
@@ -198,10 +204,32 @@ class GitManager:
             if volume_path.exists():
                 shutil.rmtree(volume_path)
 
+            # Determine ignore function
+            if ignore_manager is not None:
+                custom_ignore = ignore_manager.get_ignore_function(source_path)
+
+                def adapter_ignore(dir_path: str, files: list[str]) -> list[str]:
+                    """Adapter function for shutil.copytree ignore parameter."""
+                    ignored = []
+                    for filename in files:
+                        full_path = os.path.join(dir_path, filename)
+                        rel_path = os.path.relpath(full_path, str(validated_source))
+
+                        # Check if file/directory should be ignored
+                        is_dir = os.path.isdir(full_path)
+                        if custom_ignore(rel_path, is_dir):
+                            ignored.append(filename)
+                    return ignored
+
+                ignore_func = adapter_ignore
+            else:
+                # Fallback to basic .git ignore for backward compatibility
+                ignore_func = shutil.ignore_patterns(".git")
+
             shutil.copytree(
                 validated_source,
                 volume_path,
-                ignore=shutil.ignore_patterns(".git") if exclude_gitignore else None,
+                ignore=ignore_func,
             )
             return True
         except shutil.Error as e:

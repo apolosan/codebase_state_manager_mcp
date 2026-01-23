@@ -150,7 +150,7 @@ class SQLiteStateRepository(StateRepository):
                         git_diff_info=sm.git_diff_info,
                         hash=sm.hash,
                         created_at=sm.created_at,
-                        file_hashes=file_hashes,
+                         file_hashes=file_hashes if file_hashes else None,
                         file_hash_deltas=file_hash_deltas,
                     )
                 )
