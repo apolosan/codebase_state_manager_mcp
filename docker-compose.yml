@@ -1,36 +1,67 @@
 version: '3.8'
 
-services:
-  neo4j:
-    image: neo4j:5.24
-    container_name: codebase-neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: neo4j/password
-      NEO4J_PLUGINS: ["apoc", "graph-data-science"]
-    volumes:
-      - neo4j_data:/data
+# ============================================================================
+# Codebase State Manager - Docker Compose
+#
+# Este compose file demonstra dois modos de operação:
+# 1. COM Neo4j interno (docker-compose.yml principal)
+# 2. Com Neo4j externo (veja docker-compose.external.yml)
+#
+# Para usar SQLite apenas:
+#   NEO4J_ENABLED=false docker-compose up
+# ============================================================================
 
+services:
+  # ==========================================================================
+  # Container Principal: MCP Server com Neo4j EMBUTIDO
+  # ==========================================================================
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: codebase-state-manager
     ports:
-      - "8080:8080"
+      - "8080:8080"      # MCP Server
+      - "7474:7474"      # Neo4j HTTP
+      - "7687:7687"      # Neo4j Bolt
     environment:
-      DB_MODE: neo4j
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: password
-      DOCKER_VOLUME_NAME: codebase_state_volume
-      DOCKER_CONTAINER_NAME: codebase-state-manager
+      # Modo de operação
+      NEO4J_ENABLED: "true"          # true = usa Neo4j, false = SQLite
+      DB_MODE: "neo4j"               # neo4j ou sqlite
+      
+      # Neo4j Configuration (quando NEO4J_ENABLED=true)
+      NEO4J_URI: "bolt://localhost:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "password"
+      
+      # Docker volume para dados persistentes
+      DOCKER_VOLUME_NAME: "codebase_state_data"
     volumes:
+      # Dados persistentes
       - codebase_data:/app/data
-      - ./:/app/project
-    depends_on:
-      - neo4j
+      
+      # Opcional: Montar projeto local para desenvolvimento
+      # - ./:/app/project:ro
+      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',7687)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
+# ============================================================================
+# Volumes
+# ============================================================================
 volumes:
-  neo4j_data:
   codebase_data:
+    driver: local
+
+# ============================================================================
+# Networks (para comunicação futura com outros serviços)
+# ============================================================================
+networks:
+  default:
+    name: codebase-network
+    driver: bridge

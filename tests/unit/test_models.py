@@ -1,6 +1,6 @@
-import pytest
 from datetime import datetime
-from uuid import uuid4
+
+import pytest
 
 from src.mcp_server.models.state_model import State, Transition
 
@@ -52,7 +52,7 @@ class TestStateModel:
 
 class TestTransitionModel:
     def test_transition_creation(self):
-        transition_id = uuid4()
+        transition_id = 1
         transition = Transition(
             transition_id=transition_id,
             current_state=0,
@@ -64,7 +64,7 @@ class TestTransitionModel:
         assert transition.user_prompt == "Test transition"
 
     def test_transition_to_dict(self):
-        transition_id = uuid4()
+        transition_id = 1
         transition = Transition(
             transition_id=transition_id,
             current_state=1,
@@ -78,7 +78,7 @@ class TestTransitionModel:
         assert result["user_prompt"] == "Transition to state 2"
 
     def test_transition_from_dict(self):
-        transition_id = str(uuid4())
+        transition_id = 1
         data = {
             "transition_id": transition_id,
             "current_state": 2,

@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
 from datetime import datetime
-from uuid import UUID
+from typing import List, Optional
 
 from ..models.state_model import State, Transition
 
@@ -42,7 +41,7 @@ class TransitionRepository(ABC):
         pass
 
     @abstractmethod
-    def get_by_id(self, transition_id: UUID) -> Optional[Transition]:
+    def get_by_id(self, transition_id: int) -> Optional[Transition]:
         pass
 
     @abstractmethod

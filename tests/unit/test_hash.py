@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.mcp_server.utils.hash import generate_state_hash, validate_state_hash
 
@@ -23,14 +24,10 @@ class TestHashUtils:
 
     def test_validate_state_hash_valid(self):
         state_hash = generate_state_hash("prompt", "main", "diff", 1)
-        is_valid = validate_state_hash(
-            state_hash, "prompt", "main", "diff", 1
-        )
+        is_valid = validate_state_hash(state_hash, "prompt", "main", "diff", 1)
         assert is_valid is True
 
     def test_validate_state_hash_invalid(self):
         state_hash = generate_state_hash("prompt", "main", "diff", 1)
-        is_valid = validate_state_hash(
-            "wrong_hash", "prompt", "main", "diff", 1
-        )
+        is_valid = validate_state_hash("wrong_hash", "prompt", "main", "diff", 1)
         assert is_valid is False

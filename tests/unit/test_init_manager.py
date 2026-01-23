@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.mcp_server.utils.init_manager import is_initialized, set_initialized
 

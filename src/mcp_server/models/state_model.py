@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Optional
 from datetime import datetime, timezone
-from uuid import UUID
+from typing import Optional, Dict
 
 
 def now_utc() -> datetime:
@@ -17,6 +16,7 @@ class State:
         git_diff_info: str,
         hash: str,
         created_at: Optional[datetime] = None,
+        file_hashes: Optional[Dict[str, str]] = None,
     ) -> None:
         self.state_number = state_number
         self.user_prompt = user_prompt
@@ -24,6 +24,7 @@ class State:
         self.git_diff_info = git_diff_info
         self.hash = hash
         self.created_at = created_at or now_utc()
+        self.file_hashes = file_hashes or {}
 
     def to_dict(self) -> dict:
         return {
@@ -33,6 +34,7 @@ class State:
             "git_diff_info": self.git_diff_info,
             "hash": self.hash,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "file_hashes": self.file_hashes,
         }
 
     @classmethod
@@ -50,13 +52,14 @@ class State:
             git_diff_info=data["git_diff_info"],
             hash=data["hash"],
             created_at=created_at,
+            file_hashes=data.get("file_hashes", {}),
         )
 
 
 class Transition:
     def __init__(
         self,
-        transition_id: UUID,
+        transition_id: int,
         current_state: int,
         next_state: int,
         user_prompt: Optional[str] = None,
@@ -85,15 +88,11 @@ class Transition:
                 timestamp = datetime.fromisoformat(data["timestamp"])
             else:
                 timestamp = data["timestamp"]
-        transition_id_str = data.get("transition_id")
-        if transition_id_str is None:
+        transition_id = data.get("transition_id")
+        if transition_id is None:
             raise ValueError("transition_id is required")
-        if isinstance(transition_id_str, str):
-            from uuid import UUID
-
-            transition_id = UUID(transition_id_str)
-        else:
-            transition_id = transition_id_str
+        if isinstance(transition_id, str):
+            transition_id = int(transition_id)
         return cls(
             transition_id=transition_id,
             current_state=data["current_state"],

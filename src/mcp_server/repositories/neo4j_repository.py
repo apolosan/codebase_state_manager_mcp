@@ -1,16 +1,15 @@
-from typing import List, Optional
 from datetime import datetime
-from uuid import UUID, uuid4
+from typing import List, Optional
 
-from neo4j import GraphDatabase
+from neo4j import Driver, GraphDatabase
 
+from ..config import Settings
 from ..models.state_model import State, Transition
 from ..repositories.abstract_repositories import StateRepository, TransitionRepository
-from ..config import Settings
 
 
 class Neo4jStateRepository(StateRepository):
-    def __init__(self, driver: GraphDatabase.driver, settings: Settings) -> None:
+    def __init__(self, driver: Driver, settings: Settings) -> None:
         self.driver = driver
         self.settings = settings
         self._init_constraints()
@@ -26,24 +25,27 @@ class Neo4jStateRepository(StateRepository):
 
     def create(self, state: State) -> bool:
         with self.driver.session() as session:
-            result = session.run(
-                """
-                MERGE (s:State {state_number: $state_number})
-                SET s.user_prompt = $user_prompt,
-                    s.branch_name = $branch_name,
-                    s.git_diff_info = $git_diff_info,
-                    s.hash = $hash,
-                    s.created_at = $created_at
-                RETURN s
-                """,
-                state_number=state.state_number,
-                user_prompt=state.user_prompt,
-                branch_name=state.branch_name,
-                git_diff_info=state.git_diff_info,
-                hash=state.hash,
-                created_at=state.created_at.isoformat() if state.created_at else None,
-            )
-            return result.single() is not None
+            try:
+                result = session.run(
+                    """
+                    MERGE (s:State {state_number: $state_number})
+                    SET s.user_prompt = $user_prompt,
+                        s.branch_name = $branch_name,
+                        s.git_diff_info = $git_diff_info,
+                        s.hash = $hash,
+                        s.created_at = $created_at
+                    RETURN s
+                    """,
+                    state_number=state.state_number,
+                    user_prompt=state.user_prompt,
+                    branch_name=state.branch_name,
+                    git_diff_info=state.git_diff_info,
+                    hash=state.hash,
+                    created_at=state.created_at.isoformat() if state.created_at else None,
+                )
+                return result.single() is not None
+            except Exception:
+                return False
 
     def get_by_number(self, state_number: int) -> Optional[State]:
         with self.driver.session() as session:
@@ -57,6 +59,13 @@ class Neo4jStateRepository(StateRepository):
             record = result.single()
             if record:
                 s = record["s"]
+                file_hashes = s.get("file_hashes", {}) or {}
+                if isinstance(file_hashes, str):
+                    import json
+                    try:
+                        file_hashes = json.loads(file_hashes)
+                    except json.JSONDecodeError:
+                        file_hashes = {}
                 return State(
                     state_number=s.get("state_number", 0),
                     user_prompt=s.get("user_prompt", ""),
@@ -64,6 +73,7 @@ class Neo4jStateRepository(StateRepository):
                     git_diff_info=s.get("git_diff_info", ""),
                     hash=s.get("hash", ""),
                     created_at=datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None,
+                    file_hashes=file_hashes,
                 )
             return None
 
@@ -87,6 +97,13 @@ class Neo4jStateRepository(StateRepository):
             states = []
             for record in result:
                 s = record["s"]
+                file_hashes = s.get("file_hashes", {}) or {}
+                if isinstance(file_hashes, str):
+                    import json
+                    try:
+                        file_hashes = json.loads(file_hashes)
+                    except json.JSONDecodeError:
+                        file_hashes = {}
                 states.append(
                     State(
                         state_number=s.get("state_number", 0),
@@ -95,6 +112,7 @@ class Neo4jStateRepository(StateRepository):
                         git_diff_info=s.get("git_diff_info", ""),
                         hash=s.get("hash", ""),
                         created_at=datetime.fromisoformat(s["created_at"]) if s.get("created_at") else None,
+                        file_hashes=file_hashes,
                     )
                 )
             return states
@@ -108,12 +126,14 @@ class Neo4jStateRepository(StateRepository):
                 """,
                 state_number=state_number,
             )
-            return result.single()["count"] > 0
+            record = result.single()
+            return record is not None and record["count"] > 0
 
     def count(self) -> int:
         with self.driver.session() as session:
             result = session.run("MATCH (s:State) RETURN COUNT(s) AS count")
-            return result.single()["count"]
+            record = result.single()
+            return int(record["count"]) if record else 0
 
     def search(self, text: str) -> List[int]:
         with self.driver.session() as session:
@@ -130,47 +150,50 @@ class Neo4jStateRepository(StateRepository):
 
 
 class Neo4jTransitionRepository(TransitionRepository):
-    def __init__(self, driver: GraphDatabase.driver, settings: Settings) -> None:
+    def __init__(self, driver: Driver, settings: Settings) -> None:
         self.driver = driver
         self.settings = settings
 
     def create(self, transition: Transition) -> bool:
         with self.driver.session() as session:
-            result = session.run(
-                """
-                MATCH (from:State {state_number: $current_state})
-                MATCH (to:State {state_number: $next_state})
-                CREATE (from)-[t:TRANSITION {
-                    transition_id: $transition_id,
-                    user_prompt: $user_prompt,
-                    timestamp: $timestamp
-                }]->(to)
-                RETURN t
-                """,
-                transition_id=str(transition.transition_id),
-                current_state=transition.current_state,
-                next_state=transition.next_state,
-                user_prompt=transition.user_prompt,
-                timestamp=transition.timestamp.isoformat() if transition.timestamp else None,
-            )
-            return result.single() is not None
+            try:
+                result = session.run(
+                    """
+                    MERGE (from:State {state_number: $current_state})
+                    MERGE (to:State {state_number: $next_state})
+                    CREATE (from)-[t:TRANSITION {
+                        transition_id: $transition_id,
+                        user_prompt: $user_prompt,
+                        timestamp: $timestamp
+                    }]->(to)
+                    RETURN t
+                    """,
+                    transition_id=transition.transition_id,
+                    current_state=transition.current_state,
+                    next_state=transition.next_state,
+                    user_prompt=transition.user_prompt,
+                    timestamp=transition.timestamp.isoformat() if transition.timestamp else None,
+                )
+                return result.single() is not None
+            except Exception:
+                return False
 
-    def get_by_id(self, transition_id: UUID) -> Optional[Transition]:
+    def get_by_id(self, transition_id: int) -> Optional[Transition]:
         with self.driver.session() as session:
             result = session.run(
                 """
-                MATCH ()-[t:TRANSITION {transition_id: $transition_id}]->()
-                RETURN t
+                MATCH (from:State)-[t:TRANSITION {transition_id: $transition_id}]->(to:State)
+                RETURN t, from.state_number AS current_state, to.state_number AS next_state
                 """,
-                transition_id=str(transition_id),
+                transition_id=transition_id,
             )
             record = result.single()
             if record:
                 t = record["t"]
                 return Transition(
-                    transition_id=UUID(t.get("transition_id", "")),
-                    current_state=0,
-                    next_state=0,
+                    transition_id=t.get("transition_id", 0),
+                    current_state=record["current_state"],
+                    next_state=record["next_state"],
                     user_prompt=t.get("user_prompt"),
                     timestamp=datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None,
                 )
@@ -192,7 +215,7 @@ class Neo4jTransitionRepository(TransitionRepository):
                 if t:
                     transitions.append(
                         Transition(
-                            transition_id=UUID(t.get("transition_id", "")),
+                            transition_id=t.get("transition_id", 0),
                             current_state=record["current_state"],
                             next_state=record["next_state"],
                             user_prompt=t.get("user_prompt"),
@@ -218,7 +241,7 @@ class Neo4jTransitionRepository(TransitionRepository):
                 t = record["t"]
                 transitions.append(
                     Transition(
-                        transition_id=UUID(t.get("transition_id", "")),
+                        transition_id=t.get("transition_id", 0),
                         current_state=0,
                         next_state=0,
                         user_prompt=t.get("user_prompt"),
@@ -230,11 +253,19 @@ class Neo4jTransitionRepository(TransitionRepository):
     def count(self) -> int:
         with self.driver.session() as session:
             result = session.run("MATCH ()-[t:TRANSITION]->() RETURN COUNT(t) AS count")
-            return result.single()["count"]
+            record = result.single()
+            return int(record["count"]) if record else 0
 
 
 def create_neo4j_repositories(
     uri: str, user: str, password: str, settings: Settings
 ) -> tuple[Neo4jStateRepository, Neo4jTransitionRepository]:
-    driver = GraphDatabase.driver(uri, auth=(user, password))
+    connection_timeout_ms = settings.neo4j_connection_timeout * 1000
+    driver = GraphDatabase.driver(
+        uri,
+        auth=(user, password),
+        connection_timeout=connection_timeout_ms,
+        max_connection_lifetime=3600 * 1000,
+    )
+    driver.verify_connectivity()
     return Neo4jStateRepository(driver, settings), Neo4jTransitionRepository(driver, settings)

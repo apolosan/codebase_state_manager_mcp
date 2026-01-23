@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from pathlib import Path
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
 
 from src.mcp_server.config import Settings
 
@@ -30,15 +31,15 @@ class TestSettings:
         assert settings.sqlite_path == "/custom/path.db"
 
     def test_settings_to_dict(self):
-        settings = Settings(
-            neo4j_password="secret"
-        )
+        settings = Settings(neo4j_password="secret")
         result = settings.to_dict()
         assert result["neo4j_password"] == "***"
         assert result["db_mode"] == "neo4j"
 
     def test_settings_from_env_missing(self):
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings.from_env()
-            assert settings.db_mode == "neo4j"
-            assert settings.neo4j_password == ""
+            with patch("src.mcp_server.config.load_dotenv"):
+                settings = Settings.from_env()
+                assert settings.neo4j_enabled is True
+                assert settings.db_mode == "neo4j"
+                assert settings.neo4j_password == ""

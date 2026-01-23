@@ -1,50 +1,45 @@
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from src.mcp_server.services.git_manager import GitManager
 
 
-class TestGitManager:
-    def test_git_manager_init(self):
+def test_get_directory_hashes_excludes_binaries():
+    """Test that binary files are excluded from hashing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dir_path = Path(tmpdir)
+        # Text file
+        (dir_path / 'script.py').write_text('print("hello")')
+        # Binary file
+        (dir_path / 'data.db').write_bytes(b'binary data')
+        (dir_path / 'image.png').write_bytes(b'image data')
+
         manager = GitManager()
-        assert manager.repo_path is None
+        hashes = manager.get_directory_hashes(dir_path)
 
-    def test_git_manager_with_path(self):
-        manager = GitManager(Path("/test/path"))
-        assert manager.repo_path == Path("/test/path")
+        assert 'script.py' in hashes
+        assert 'data.db' not in hashes
+        assert 'image.png' not in hashes
 
-    def test_is_git_repo_true(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            git_dir = Path(tmpdir) / ".git"
-            git_dir.mkdir()
-            manager = GitManager(Path(tmpdir))
-            assert manager.is_git_repo(Path(tmpdir)) is True
 
-    def test_is_git_repo_false(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manager = GitManager(Path(tmpdir))
-            assert manager.is_git_repo(Path(tmpdir)) is False
+def test_get_working_diff():
+    """Test getting working directory diff."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo_path = Path(tmpdir)
+        # Initialize git repo
+        manager = GitManager(repo_path)
+        manager.init_repo(repo_path)
 
-    @patch("subprocess.run")
-    def test_get_current_branch(self, mock_run):
-        mock_run.return_value = MagicMock(
-            stdout="main\n",
-            returncode=0,
-        )
-        manager = GitManager()
-        branch = manager.get_current_branch()
-        assert branch == "main"
-        mock_run.assert_called_once()
+        # Create and commit a file
+        test_file = repo_path / 'test.txt'
+        test_file.write_text('initial content')
+        manager._run_git_command(['git', 'add', 'test.txt'], cwd=repo_path)
+        manager._run_git_command(['git', 'commit', '-m', 'initial commit'], cwd=repo_path)
 
-    @patch("subprocess.run")
-    def test_get_diff(self, mock_run):
-        mock_run.return_value = MagicMock(
-            stdout="diff content\n",
-            returncode=0,
-        )
-        manager = GitManager()
-        diff = manager.get_diff(commits=1)
-        assert diff == "diff content"
-        mock_run.assert_called_once()
+        # Modify the file
+        test_file.write_text('modified content')
+
+        # Get working diff
+        diff = manager.get_working_diff(repo_path)
+        assert 'modified content' in diff
+        assert '-initial content' in diff

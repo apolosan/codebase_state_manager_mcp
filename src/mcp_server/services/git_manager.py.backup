@@ -1,0 +1,148 @@
+import hashlib
+import os  # nosec: B404
+import signal  # nosec: B404
+import subprocess  # nosec: B404
+import shutil
+from pathlib import Path
+from typing import Optional, Dict, Tuple
+
+from ..utils.validation import ValidationError, validate_path
+
+
+class GitOperationError(Exception):
+    """Exceção para erros em operações git."""
+
+    pass
+
+
+class GitTimeoutError(Exception):
+    """Exceção para operações git que excederam o timeout."""
+
+    pass
+
+
+GIT_TIMEOUT_SECONDS = 30
+GIT_COMMAND_TIMEOUT = 60
+
+
+class GitManager:
+    def __init__(self, repo_path: Optional[Path] = None) -> None:
+        self.repo_path = repo_path
+
+    def _run_git_command(
+        self,
+        args: list[str],
+        cwd: Optional[Path] = None,
+        timeout: int = GIT_COMMAND_TIMEOUT,
+    ) -> subprocess.CompletedProcess:
+        target_path = cwd or self.repo_path
+        if target_path is None:
+            raise GitOperationError("Nenhum repositório especificado")
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(target_path)
+            result = subprocess.run(  # nosec: B603
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                raise GitOperationError(f"Git command failed: {' '.join(args)} - {error_msg}")
+            return result
+        except subprocess.TimeoutExpired:
+            raise GitTimeoutError(f"Git command timed out after {timeout}s: {' '.join(args)}")
+        except Exception as e:
+            error_msg = str(e)
+            if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+                raise GitTimeoutError(f"Git command timed out after {timeout}s: {' '.join(args)}")
+            raise GitOperationError(f"Git command failed: {' '.join(args)} - {error_msg}")
+        finally:
+            os.chdir(original_cwd)
+
+    def get_current_branch(self, repo_path: Optional[Path] = None) -> str:
+        target_path = repo_path or self.repo_path
+        if target_path:
+            result = self._run_git_command(
+                ["git", "branch", "--show-current"],
+                cwd=target_path,
+            )
+            stdout: str = result.stdout.strip()
+            return stdout
+        result = self._run_git_command(["git", "branch", "--show-current"])
+        stdout = result.stdout.strip()
+        return stdout
+
+    def get_diff(self, commits: int = 3, repo_path: Optional[Path] = None) -> str:
+        target_path = repo_path or self.repo_path
+        if target_path is None:
+            raise GitOperationError("Nenhum repositório especificado")
+
+        result = self._run_git_command(
+            ["git", "diff", f"HEAD~{commits}"],
+            cwd=target_path,
+        )
+        diff_output: str = result.stdout.strip()
+        return diff_output
+
+    def clone_to_volume(
+        self, source_path: Path, volume_path: Path, exclude_gitignore: bool = True
+    ) -> bool:
+        import shutil
+
+        try:
+            validated_source = validate_path(str(source_path), source_path.parent)
+
+            if volume_path.exists():
+                shutil.rmtree(volume_path)
+
+            shutil.copytree(
+                validated_source,
+                volume_path,
+                ignore=shutil.ignore_patterns(".git") if exclude_gitignore else None,
+            )
+            return True
+        except shutil.Error as e:
+            raise GitOperationError(f"Failed to copy files: {e}")
+        except ValidationError as e:
+            raise GitOperationError(f"Invalid source path: {e}")
+        except Exception as e:
+            return False
+
+    def init_repo(self, path: Path) -> bool:
+        try:
+            self._run_git_command(["git", "init"], cwd=path)
+            self._run_git_command(
+                ["git", "config", "user.email", "mcp@codebase.local"],
+                cwd=path,
+            )
+            self._run_git_command(
+                ["git", "config", "user.name", "Codebase State Manager"],
+                cwd=path,
+            )
+            return True
+        except (GitOperationError, GitTimeoutError):
+            return False
+
+    def create_branch(self, branch_name: str, repo_path: Optional[Path] = None) -> bool:
+        target_path = repo_path or self.repo_path
+        if not target_path:
+            return False
+        try:
+            self._run_git_command(
+                ["git", "checkout", "-b", branch_name],
+                cwd=target_path,
+            )
+            return True
+        except (GitOperationError, GitTimeoutError):
+            return False
+
+    def is_git_repo(self, path: Path) -> bool:
+        try:
+            git_path = path / ".git"
+            return git_path.exists() and git_path.is_dir()
+        except (OSError, ValueError):
+            return False

@@ -1,5 +1,5 @@
 import hashlib
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def generate_state_hash(
@@ -12,7 +12,5 @@ def generate_state_hash(
 def validate_state_hash(
     state_hash: str, user_prompt: str, branch_name: str, git_diff_info: str, state_number: int
 ) -> bool:
-    expected_hash = generate_state_hash(
-        user_prompt, branch_name, git_diff_info, state_number
-    )
+    expected_hash = generate_state_hash(user_prompt, branch_name, git_diff_info, state_number)
     return state_hash == expected_hash
