@@ -204,9 +204,14 @@ class GitignoreParser:
 
         # Check if the path itself matches
         if re.match(regex_pattern, path, re.IGNORECASE):
-            # For directory patterns, only match if it's actually a directory
+            # For directory patterns, we need to check if we're matching a directory
+            # A directory pattern like "build/" should match "build" (directory) but not "build" (file)
             if is_directory_pattern and not is_dir:
-                return False
+                # This is a directory pattern and we're checking a file with the same name
+                # Check if this is exactly the directory name (not a file with the same name)
+                if path == pattern:
+                    # This is a file with the same name as the directory pattern, don't ignore it
+                    return False
             return True
 
         # For directory patterns, check if pattern appears as directory component anywhere in path
@@ -214,6 +219,8 @@ class GitignoreParser:
             path_parts = path.split("/")
             pattern_name = pattern  # pattern already has / removed
             if pattern_name in path_parts:
+                # If the pattern appears as a directory component, ignore it
+                # This handles cases like "projeto/node_modules" or "node_modules/package.json"
                 return True
 
         return False

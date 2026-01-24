@@ -290,7 +290,8 @@ class GitManager:
         if ignore_manager is not None and project_path is not None:
             try:
                 ignore_func = ignore_manager.get_ignore_function(project_path)
-                return ignore_func(relative_path, is_dir)
+                if ignore_func(relative_path, is_dir):
+                    return True
             except (OSError, IOError, ValueError, RuntimeError):
                 # Fall back to default patterns if ignore_manager fails
                 pass
@@ -300,12 +301,27 @@ class GitManager:
             # Patterns already use '/' as separator
             # Check if pattern matches the normalized path
             if fnmatch.fnmatch(normalized_path, pattern):
+                # Special handling for directory patterns (ending with /)
+                # A directory pattern like "build/" should match "build" (directory) but not "build" (file)
+                if pattern.endswith("/") and not is_dir:
+                    # Check if this is exactly matching a file with the same name as the directory pattern
+                    pattern_dir = pattern.rstrip("/")
+                    if normalized_path == pattern_dir:
+                        # This is a file with the same name as the directory pattern, don't ignore it
+                        continue  # Don't return True, continue to check other patterns
                 return True
             # For directory patterns (ending with /), also match as directory component
-            if pattern.endswith("/") and not is_dir:
-                # Check if pattern (without trailing slash) appears as directory component
+            # This handles cases like "node_modules/" matching "projeto/node_modules"
+            if pattern.endswith("/"):
                 pattern_dir = pattern.rstrip("/")
-                if pattern_dir in normalized_path.split("/"):
+                path_parts = normalized_path.split("/")
+                # Check if the directory pattern appears as a component in the path
+                if pattern_dir in path_parts:
+                    # Special case: if checking a file with the exact same name as the directory pattern
+                    if not is_dir and normalized_path == pattern_dir:
+                        # This is a file with the same name as the directory pattern, don't ignore it
+                        continue
+                    # Otherwise, it's either a directory or a file inside the directory
                     return True
 
         # Check binary extensions for files
