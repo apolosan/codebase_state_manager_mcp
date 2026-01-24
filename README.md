@@ -2,10 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-310%20passed-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-440%20passed-green.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-90%25-green.svg)]()
 [![mypy](https://img.shields.io/badge/mypy-passing-green.svg)]()
 [![Bandit](https://img.shields.io/badge/bandit-clean-green.svg)]()
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)]()
 [![Status: WIP](https://img.shields.io/badge/status-WIP-yellow.svg)]()
 
 A sophisticated Model Context Protocol (MCP) server for managing codebase states with version control, graph database tracking, and containerized execution environments.
@@ -57,7 +58,9 @@ MCP Client → Tools Layer → Services Layer → Repositories Layer → Databas
 - **Repositories Layer**: Data access abstraction (Neo4j/SQLite)
 - **Utilities**: Security, logging, metrics, and validation modules
 
-## 📦 Installation
+For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.10+
@@ -65,16 +68,16 @@ MCP Client → Tools Layer → Services Layer → Repositories Layer → Databas
 - Git
 - Neo4j (optional, for graph database features)
 
-### Quick Start
+### Installation
 ```bash
 # Clone the repository
 git clone https://github.com/apolosan/codebase_state_manager_mcp.git
 cd codebase_state_manager_mcp
 
-# Setup environment
+# Setup environment (uses uv if available)
 ./scripts/setup.sh
 
-# Run tests to verify installation
+# Verify installation with tests
 ./scripts/run_tests.sh
 ```
 
@@ -97,7 +100,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Using the launcher script
 python run_mcp_server.py
 
-# Or directly
+# Or directly via module
 python -m src.mcp_server
 ```
 
@@ -106,7 +109,7 @@ python -m src.mcp_server
 # Build and run with Docker Compose
 docker-compose up --build
 
-# Test with Docker
+# Run test suite in Docker
 docker-compose -f docker-compose.test.yml up --build
 ```
 
@@ -125,6 +128,7 @@ docker-compose -f docker-compose.test.yml up --build
 - `get_state_transitions(state_number)` - Get transitions from/to a state
 - `get_transition_info(transition_id)` - Get transition details
 - `track_transitions()` - Monitor recent transitions
+- `get_current_state_transitions()` - Get transitions for current state
 
 ## 🔧 Configuration
 
@@ -182,10 +186,11 @@ Automatically falls back to SQLite when Neo4j is unavailable. Data is stored in 
 ```
 
 ### Test Statistics
-- **310 Total Tests**: 100% passing
+- **440 Total Tests**: 100% passing
 - **90% Code Coverage**: Comprehensive test suite
 - **Security Tests**: Bandit, audit logging, rate limiting
 - **Performance Tests**: Stress testing and metrics validation
+- **Integration Tests**: Docker, Neo4j, SQLite integration
 
 ## 🔒 Security
 
@@ -225,6 +230,8 @@ python -m pytest tests/security/ -v
 
 ## 🤝 Contributing
 
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
 ### Development Setup
 ```bash
 # Install development dependencies
@@ -251,13 +258,17 @@ chmod +x .git/hooks/pre-commit
 4. Add integration tests for database interactions
 5. Include performance tests for critical paths
 
+For comprehensive agent guidelines, see [AGENTS.md](AGENTS.md).
+
 ## 📚 Documentation
 
 ### Key Documents
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design decisions
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines and processes
 - [CHANGELOG.md](CHANGELOG.md) - Version history and changes
-- [API Reference](API_REFERENCE.md) - Complete API documentation
+- [AGENTS.md](AGENTS.md) - Agent guidelines and operational requirements
+- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+- [SETUP.md](SETUP.md) - Detailed setup instructions
 
 ### Code Documentation
 - Comprehensive docstrings following Google style
