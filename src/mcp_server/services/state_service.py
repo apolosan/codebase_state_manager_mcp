@@ -192,11 +192,18 @@ class StateService:
         # Create ignore manager to respect .gitignore patterns
         ignore_manager = IgnoreManager()
 
-        last_hashes = getattr(current_state, "file_hashes", {}) or {}
-        if not last_hashes and volume_codebase.exists():
-            last_hashes = self.git_manager.get_directory_hashes(
-                volume_codebase, ignore_manager=ignore_manager
-            )
+        # Reconstruct complete file hashes for the PREVIOUS state
+        # This ensures proper tracking based on actual content changes between states
+        try:
+            last_hashes = self._get_previous_state_full_hashes(current_state)
+        except StateNotFoundError as e:
+            # Fallback: if genesis state missing, try to get from volume
+            if volume_codebase.exists():
+                last_hashes = self.git_manager.get_directory_hashes(
+                    volume_codebase, ignore_manager=ignore_manager
+                )
+            else:
+                last_hashes = {}
         diff_info, delta_hashes = self.git_manager.compute_changes_since_last_state(
             project_path=project_path,
             last_state_file_hashes=last_hashes,
@@ -366,6 +373,81 @@ class StateService:
                         current_hashes[file_path] = hash_val
 
         return current_hashes
+
+    def _get_current_full_hashes(self, current_state: State) -> Dict[str, str]:
+        """Get complete file hashes for the current state by reconstructing from genesis + all deltas."""
+        # If current state has full hashes (genesis state), use them directly
+        if current_state.state_number == 0 and current_state.file_hashes:
+            return dict(current_state.file_hashes)
+
+        # For transition states, reconstruct from genesis by applying all deltas up to current state
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        current_hashes = dict(genesis_state.file_hashes or {})
+
+        # Apply deltas from state 1 up to current state
+        for state_num in range(1, current_state.state_number + 1):
+            state = self.state_repo.get_by_number(state_num)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                # Apply deltas: update/add files, remove deleted ones
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        current_hashes.pop(file_path, None)
+                    else:
+                        current_hashes[file_path] = hash_val
+
+        return current_hashes
+
+    def _get_previous_state_full_hashes(self, current_state: State) -> Dict[str, str]:
+        """Get complete file hashes for the state BEFORE the current state.
+
+        CRITICAL FIX FOR GIT_DIFF_INFO TRACKING:
+        This method resolves the issue where files appeared as 'added' in multiple states.
+
+        PROBLEM SOLVED:
+        - Previously: `last_hashes = getattr(current_state, "file_hashes", {})` returned empty for transition states
+        - Now: Reconstruct complete hashes by applying deltas from genesis up to the previous state
+        - Result: Files appear as 'added' only once, then as 'modified' when content changes
+
+        USAGE:
+        Used in new_state_transition() to get proper hash comparison baseline.
+        This ensures git_diff_info tracks actual content changes, not git repository status.
+
+        Args:
+            current_state: The current state from which we'll transition to the next state
+
+        Returns:
+            Complete file hashes for the state immediately before current_state
+
+        Raises:
+            StateNotFoundError: If genesis state cannot be found
+        """
+        # If current state is genesis, there's no previous state
+        if current_state.state_number == 0:
+            return {}
+
+        # Reconstruct hashes up to the state BEFORE current state
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        previous_hashes = dict(genesis_state.file_hashes or {})
+
+        # Apply deltas from state 1 up to (current_state.state_number - 1)
+        # This builds the complete file hash state for the previous state
+        for state_num in range(1, current_state.state_number):
+            state = self.state_repo.get_by_number(state_num)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                # Apply deltas: update/add files, remove deleted ones
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        previous_hashes.pop(file_path, None)
+                    else:
+                        previous_hashes[file_path] = hash_val
+
+        return previous_hashes
 
     def track_transitions(self) -> tuple[list, str]:
         if not is_initialized(self.settings.docker_volume_name):
