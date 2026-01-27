@@ -34,16 +34,14 @@ class TestDeltaStorage:
             (temp_path / "deleted.py").unlink()  # deleted
 
             diff_info, delta_hashes = git_manager.compute_changes_since_last_state(
-                project_path=temp_path,
-                last_state_file_hashes=last_hashes,
-                is_genesis=False
+                project_path=temp_path, last_state_file_hashes=last_hashes, is_genesis=False
             )
 
             # Check deltas: only changed/new/deleted files
             assert "file1.py" not in delta_hashes  # unchanged
             assert delta_hashes.get("file2.py") is not None  # changed
             assert delta_hashes.get("file3.py") is not None  # new
-            assert delta_hashes.get("deleted.py") is None   # deleted
+            assert delta_hashes.get("deleted.py") is None  # deleted
 
     def test_compute_changes_since_last_state_genesis(self):
         """Test that genesis returns full hashes."""
@@ -56,7 +54,7 @@ class TestDeltaStorage:
             diff_info, delta_hashes = git_manager.compute_changes_since_last_state(
                 project_path=temp_path,
                 last_state_file_hashes={},  # empty for genesis
-                is_genesis=True
+                is_genesis=True,
             )
 
             # Should return full current hashes
@@ -75,7 +73,7 @@ class TestDeltaStorage:
             branch_name="main",
             git_diff_info="",
             hash="genesis_hash",
-            file_hashes={"file1.py": "hash1", "file2.py": "hash2"}
+            file_hashes={"file1.py": "hash1", "file2.py": "hash2"},
         )
 
         # Mock state 1 with deltas: file2 changed, file3 added
@@ -85,29 +83,28 @@ class TestDeltaStorage:
             branch_name="main",
             git_diff_info="",
             hash="state1_hash",
-            file_hash_deltas={"file2.py": "hash2_new", "file3.py": "hash3"}
+            file_hash_deltas={"file2.py": "hash2_new", "file3.py": "hash3"},
         )
 
-        mock_state_repo.get_by_number.side_effect = lambda n: {
-            0: genesis_state,
-            1: state1
-        }.get(n)
+        mock_state_repo.get_by_number.side_effect = lambda n: {0: genesis_state, 1: state1}.get(n)
 
         # Create state service with mock repo
         state_service = StateService(
             state_repo=mock_state_repo,
             transition_repo=MagicMock(),
             git_manager=GitManager(),
-            settings=MagicMock()
+            settings=MagicMock(),
         )
 
         # Reconstruct hashes for state 1
-        reconstructed = state_service._reconstruct_file_hashes(1, {"file2.py": "hash2_new", "file3.py": "hash3"})
+        reconstructed = state_service._reconstruct_file_hashes(
+            1, {"file2.py": "hash2_new", "file3.py": "hash3"}
+        )
 
         expected = {
-            "file1.py": "hash1",      # from genesis
+            "file1.py": "hash1",  # from genesis
             "file2.py": "hash2_new",  # updated in state 1
-            "file3.py": "hash3"       # added in state 1
+            "file3.py": "hash3",  # added in state 1
         }
         assert reconstructed == expected
 
@@ -120,7 +117,7 @@ class TestDeltaStorage:
             git_diff_info="",
             hash="test_hash",
             file_hashes={"file1.py": "hash1"},
-            file_hash_deltas={"file1.py": "hash1", "file2.py": "hash2"}
+            file_hash_deltas={"file1.py": "hash1", "file2.py": "hash2"},
         )
 
         assert state.file_hashes == {"file1.py": "hash1"}

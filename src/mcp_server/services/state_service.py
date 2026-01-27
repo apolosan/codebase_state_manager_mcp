@@ -69,8 +69,28 @@ class StateService:
 
         try:
             source_path = Path(project_path)
-            Path(volume_path).mkdir(parents=True, exist_ok=True)
             target_path = Path(volume_path) / "codebase"
+
+            # Validate that target_path is not inside source_path to prevent recursion
+            try:
+                if target_path.is_relative_to(source_path):
+                    return (
+                        False,
+                        None,
+                        (
+                            "Volume path must be outside the project path. "
+                            f"Got volume_path='{volume_path}' which resolves to "
+                            f"'{target_path}' inside project_path='{project_path}'. "
+                            "This would cause infinite recursion during file copy."
+                        ),
+                    )
+            except ValueError:
+                # is_relative_to can raise ValueError if paths are on different drives (Windows)
+                # In this case, they're definitely not relative to each other
+                pass
+
+            # Create volume directory
+            Path(volume_path).mkdir(parents=True, exist_ok=True)
 
             # Initialize ignore manager for intelligent filtering
             ignore_manager = IgnoreManager()

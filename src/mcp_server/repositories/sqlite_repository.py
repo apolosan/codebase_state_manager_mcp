@@ -196,25 +196,22 @@ class SQLiteStateRepository(StateRepository):
 
     def create_next(self, state: State) -> bool:
         """Create a new state with the next sequential state number."""
+        from sqlalchemy import text
+
         session = self.session_factory()
         try:
-            # Acquire exclusive lock to prevent race conditions
-            session.execute("BEGIN IMMEDIATE")
+            session.execute(text("BEGIN IMMEDIATE"))
 
-            # Get current maximum state number
             max_state = session.query(func.max(StateModel.state_number)).scalar()
             next_state_number = (max_state + 1) if max_state is not None else 0
 
-            # Check if state with this number already exists (should not happen with lock)
             existing = session.query(StateModel).filter_by(state_number=next_state_number).first()
             if existing:
                 session.rollback()
                 return False
 
-            # Update the state object with the new number
             state.state_number = next_state_number
 
-            # Generate hash with the correct state number
             state.hash = generate_state_hash(
                 state.user_prompt,
                 state.branch_name,
@@ -222,13 +219,11 @@ class SQLiteStateRepository(StateRepository):
                 state.state_number,
             )
 
-            # Convert file hashes to JSON
             file_hashes_json = json.dumps(state.file_hashes) if state.file_hashes else None
             file_hash_deltas_json = (
                 json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
             )
 
-            # Create model and persist
             state_model = StateModel(
                 state_number=state.state_number,
                 user_prompt=state.user_prompt,
@@ -282,25 +277,22 @@ class SQLiteTransitionRepository(TransitionRepository):
 
     def create_next(self, transition: Transition) -> bool:
         """Create a new transition with the next sequential transition ID."""
+        from sqlalchemy import text
+
         session = self.session_factory()
         try:
-            # Acquire exclusive lock to prevent race conditions
-            session.execute("BEGIN IMMEDIATE")
+            session.execute(text("BEGIN IMMEDIATE"))
 
-            # Get current maximum transition ID
             max_id = session.query(func.max(TransitionModel.id)).scalar()
             next_id = (max_id + 1) if max_id is not None else 1
 
-            # Check if transition with this ID already exists (should not happen with lock)
             existing = session.query(TransitionModel).filter_by(id=next_id).first()
             if existing:
                 session.rollback()
                 return False
 
-            # Update the transition object with the new ID
             transition.transition_id = next_id
 
-            # Create model and persist
             transition_model = TransitionModel(
                 id=transition.transition_id,
                 current_state=transition.current_state,

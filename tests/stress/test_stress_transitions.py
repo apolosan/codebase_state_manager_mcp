@@ -101,7 +101,10 @@ class TestStressTransitions:
     def git_manager(self):
         manager = MagicMock()
         manager.get_diff.return_value = "diff content"
-        manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+        manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
         return manager
 
     @pytest.fixture

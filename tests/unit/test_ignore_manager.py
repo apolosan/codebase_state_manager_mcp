@@ -59,7 +59,9 @@ class TestProjectDetector:
         """Test detection of Java projects."""
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir)
-            (project_path / "pom.xml").write_text('<project><modelVersion>4.0.0</modelVersion></project>')
+            (project_path / "pom.xml").write_text(
+                "<project><modelVersion>4.0.0</modelVersion></project>"
+            )
 
             detector = ProjectDetector()
             result = detector.detect_project_type(project_path)
@@ -212,11 +214,26 @@ class TestGitignoreParser:
         """Test that directory patterns match nested occurrences."""
         # Directory patterns should match at any depth
         assert GitignoreParser._matches_pattern("node_modules", "node_modules/", True) is True
-        assert GitignoreParser._matches_pattern("node_modules/express", "node_modules/", True) is True
+        assert (
+            GitignoreParser._matches_pattern("node_modules/express", "node_modules/", True) is True
+        )
         assert GitignoreParser._matches_pattern("some/node_modules", "node_modules/", True) is True
-        assert GitignoreParser._matches_pattern("some/node_modules/package.json", "node_modules/", False) is True
-        assert GitignoreParser._matches_pattern("deep/nested/path/node_modules", "node_modules/", True) is True
-        assert GitignoreParser._matches_pattern("deep/nested/path/node_modules/lib", "node_modules/", True) is True
+        assert (
+            GitignoreParser._matches_pattern(
+                "some/node_modules/package.json", "node_modules/", False
+            )
+            is True
+        )
+        assert (
+            GitignoreParser._matches_pattern("deep/nested/path/node_modules", "node_modules/", True)
+            is True
+        )
+        assert (
+            GitignoreParser._matches_pattern(
+                "deep/nested/path/node_modules/lib", "node_modules/", True
+            )
+            is True
+        )
 
         # Should not match unrelated directories
         assert GitignoreParser._matches_pattern("some", "node_modules/", True) is False

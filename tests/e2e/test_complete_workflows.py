@@ -121,7 +121,10 @@ class TestCompleteWorkflows:
         manager.clone_to_volume.return_value = True
         manager.get_current_branch.return_value = "main"
         manager.get_diff.return_value = "diff content"
-        manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+        manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
         return manager
 
     @pytest.fixture
@@ -250,7 +253,10 @@ class TestMCPToolsIntegration:
         manager.clone_to_volume.return_value = True
         manager.get_current_branch.return_value = "feature/test"
         manager.get_diff.return_value = "diff content"
-        manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+        manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
         return manager
 
     @pytest.fixture
@@ -397,7 +403,10 @@ class TestSecurityWorkflows:
         manager.clone_to_volume.return_value = True
         manager.get_current_branch.return_value = "main"
         manager.get_diff.return_value = "diff"
-        manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+        manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
         return manager
 
     @pytest.fixture

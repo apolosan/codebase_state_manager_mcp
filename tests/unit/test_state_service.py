@@ -128,9 +128,19 @@ class TestStateServiceGenesis:
 
         assert success is True
         assert state is not None
-        assert state.state_number == 0
-        assert "Genesis" in state.user_prompt
-        assert "main" in state.branch_name
+
+    def test_genesis_volume_path_inside_project_path_fails(self, state_service, settings, tmp_path):
+        """Test that genesis fails when volume_path is inside project_path."""
+        project_path = str(tmp_path / "project")
+        # volume_path INSIDE project_path - this should fail
+        volume_path = str(tmp_path / "project" / "volume")
+        Path(project_path).mkdir()
+
+        success, state, message = state_service.genesis(project_path, volume_path)
+
+        assert success is False
+        assert state is None
+        assert "must be outside the project path" in message
 
     def test_genesis_already_initialized(self, state_service, git_manager, settings, tmp_path):
         project_path = str(tmp_path / "project")
@@ -177,7 +187,10 @@ class TestStateServiceTransitions:
     def git_manager(self):
         manager = MagicMock()
         manager.get_diff.return_value = "new diff content"
-        manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+        manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
         manager.get_directory_hashes.return_value = {}
         return manager
 

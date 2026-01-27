@@ -128,14 +128,12 @@
       },
       "enabled": false
     },
-    "minimax": {
+    "MiniMax": {
       "type": "local",
-      "command": ["uvx", "minimax-coding-plan-mcp"],
+      "command": ["uvx", "minimax-coding-plan-mcp", "-y"],
       "environment": {
-        "MINIMAX_API_KEY": "{env:MINIMAX_API}",
-        "MINIMAX_MCP_BASE_PATH": "/home/einar/Documentos/codebase_state_manager_mcp/",
-        "MINIMAX_API_HOST": "https://api.minimax.io",
-        "MINIMAX_API_RESOURCE_MODE": "local"
+        "MINIMAX_API_KEY": "{env:MINIMAX_API_KEY}",
+        "MINIMAX_API_HOST": "https://api.minimax.io"
       },
       "enabled": true
     }

@@ -62,7 +62,9 @@ class TestGenesisIgnoreIntegration:
         project_path.mkdir()
 
         # Create pyproject.toml
-        (project_path / "pyproject.toml").write_text('[tool.poetry]\nname = "test"\nversion = "1.0.0"')
+        (project_path / "pyproject.toml").write_text(
+            '[tool.poetry]\nname = "test"\nversion = "1.0.0"'
+        )
 
         # Create some files that should be ignored
         pycache = project_path / "__pycache__"

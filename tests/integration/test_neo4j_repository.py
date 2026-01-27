@@ -521,6 +521,7 @@ class TestNeo4jTransitionRepositoryEdgeCases:
         _, transition_repo = neo4j_repos
 
         from uuid import uuid4
+
         result = transition_repo.get_by_id(uuid4())
         assert result is None
 

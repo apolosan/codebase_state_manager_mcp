@@ -32,20 +32,24 @@ class TestMainEntryPoint:
         transition_repo.count.return_value = 0
         return state_repo, transition_repo
 
-
     def test_main_with_sqlite_mode(self, mock_settings, mock_repositories, capsys):
         """Test main function with SQLite database mode."""
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging') as mock_setup_logging, \
-             patch('src.mcp_server.utils.logging.get_logger') as mock_get_logger, \
-             patch('src.mcp_server.utils.security.get_rate_limiter') as mock_get_rate_limiter, \
-             patch('src.mcp_server.utils.audit.get_audit_logger') as mock_get_audit_logger, \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager') as mock_git_manager_class, \
-             patch('src.mcp_server.services.state_service.StateService') as mock_state_service_class, \
-             patch('src.mcp_server.tools.mcp_tools'):
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging") as mock_setup_logging,
+            patch("src.mcp_server.utils.logging.get_logger") as mock_get_logger,
+            patch("src.mcp_server.utils.security.get_rate_limiter") as mock_get_rate_limiter,
+            patch("src.mcp_server.utils.audit.get_audit_logger") as mock_get_audit_logger,
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager") as mock_git_manager_class,
+            patch("src.mcp_server.services.state_service.StateService") as mock_state_service_class,
+            patch("src.mcp_server.tools.mcp_tools"),
+        ):
 
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
@@ -58,7 +62,7 @@ class TestMainEntryPoint:
             from src.mcp_server.__main__ import main
 
             # Mock app.run to prevent stdin/stdout blocking
-            with patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+            with patch("src.mcp_server.mcp_server.app.run") as mock_app_run:
                 main()
 
             mock_setup_logging.assert_called_once_with(log_level="INFO")
@@ -66,7 +70,10 @@ class TestMainEntryPoint:
             mock_rate_limiter.enable.assert_called_once()
             mock_audit_logger.enable.assert_called_once()
             assert mock_logger.info.called
-            assert any("Starting" in str(call) or "MCP Server" in str(call) for call in mock_logger.info.call_args_list)
+            assert any(
+                "Starting" in str(call) or "MCP Server" in str(call)
+                for call in mock_logger.info.call_args_list
+            )
             mock_app_run.assert_called_once()
 
     def test_main_with_neo4j_mode(self, mock_settings, mock_repositories, capsys):
@@ -74,15 +81,20 @@ class TestMainEntryPoint:
         mock_settings.db_mode = "neo4j"
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging') as mock_setup_logging, \
-             patch('src.mcp_server.utils.logging.get_logger') as mock_get_logger, \
-             patch('src.mcp_server.utils.security.get_rate_limiter') as mock_get_rate_limiter, \
-             patch('src.mcp_server.utils.audit.get_audit_logger') as mock_get_audit_logger, \
-             patch('src.mcp_server.repositories.neo4j_repository.create_neo4j_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager') as mock_git_manager_class, \
-             patch('src.mcp_server.services.state_service.StateService') as mock_state_service_class, \
-             patch('src.mcp_server.tools.mcp_tools'):
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging") as mock_setup_logging,
+            patch("src.mcp_server.utils.logging.get_logger") as mock_get_logger,
+            patch("src.mcp_server.utils.security.get_rate_limiter") as mock_get_rate_limiter,
+            patch("src.mcp_server.utils.audit.get_audit_logger") as mock_get_audit_logger,
+            patch(
+                "src.mcp_server.repositories.neo4j_repository.create_neo4j_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager") as mock_git_manager_class,
+            patch("src.mcp_server.services.state_service.StateService") as mock_state_service_class,
+            patch("src.mcp_server.tools.mcp_tools"),
+        ):
 
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
@@ -94,11 +106,14 @@ class TestMainEntryPoint:
             from src.mcp_server.__main__ import main
 
             # Mock app.run to prevent stdin/stdout blocking
-            with patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+            with patch("src.mcp_server.mcp_server.app.run") as mock_app_run:
                 main()
 
             assert mock_logger.info.called
-            assert any("Neo4j" in str(call) or "Connected" in str(call) for call in mock_logger.info.call_args_list)
+            assert any(
+                "Neo4j" in str(call) or "Connected" in str(call)
+                for call in mock_logger.info.call_args_list
+            )
             mock_app_run.assert_called_once()
 
     def test_main_disables_rate_limiting_when_disabled(self, mock_settings, mock_repositories):
@@ -106,16 +121,21 @@ class TestMainEntryPoint:
         mock_settings.rate_limit_enabled = False
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging'), \
-             patch('src.mcp_server.utils.logging.get_logger'), \
-             patch('src.mcp_server.utils.security.get_rate_limiter') as mock_get_rate_limiter, \
-             patch('src.mcp_server.utils.audit.get_audit_logger'), \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager'), \
-             patch('src.mcp_server.services.state_service.StateService'), \
-             patch('src.mcp_server.tools.mcp_tools'), \
-             patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging"),
+            patch("src.mcp_server.utils.logging.get_logger"),
+            patch("src.mcp_server.utils.security.get_rate_limiter") as mock_get_rate_limiter,
+            patch("src.mcp_server.utils.audit.get_audit_logger"),
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager"),
+            patch("src.mcp_server.services.state_service.StateService"),
+            patch("src.mcp_server.tools.mcp_tools"),
+            patch("src.mcp_server.mcp_server.app.run") as mock_app_run,
+        ):
 
             mock_rate_limiter = MagicMock()
             mock_get_rate_limiter.return_value = mock_rate_limiter
@@ -133,16 +153,21 @@ class TestMainEntryPoint:
         mock_settings.audit_enabled = False
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging'), \
-             patch('src.mcp_server.utils.logging.get_logger'), \
-             patch('src.mcp_server.utils.security.get_rate_limiter') as mock_get_rate_limiter, \
-             patch('src.mcp_server.utils.audit.get_audit_logger') as mock_get_audit_logger, \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager'), \
-             patch('src.mcp_server.services.state_service.StateService'), \
-             patch('src.mcp_server.tools.mcp_tools'), \
-             patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging"),
+            patch("src.mcp_server.utils.logging.get_logger"),
+            patch("src.mcp_server.utils.security.get_rate_limiter") as mock_get_rate_limiter,
+            patch("src.mcp_server.utils.audit.get_audit_logger") as mock_get_audit_logger,
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager"),
+            patch("src.mcp_server.services.state_service.StateService"),
+            patch("src.mcp_server.tools.mcp_tools"),
+            patch("src.mcp_server.mcp_server.app.run") as mock_app_run,
+        ):
 
             mock_rate_limiter = MagicMock()
             mock_get_rate_limiter.return_value = mock_rate_limiter
@@ -161,16 +186,21 @@ class TestMainEntryPoint:
         """Test that StateService is properly initialized."""
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging'), \
-             patch('src.mcp_server.utils.logging.get_logger'), \
-             patch('src.mcp_server.utils.security.get_rate_limiter'), \
-             patch('src.mcp_server.utils.audit.get_audit_logger'), \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager') as mock_git_manager_class, \
-             patch('src.mcp_server.services.state_service.StateService') as mock_state_service_class, \
-             patch('src.mcp_server.tools.mcp_tools'), \
-             patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging"),
+            patch("src.mcp_server.utils.logging.get_logger"),
+            patch("src.mcp_server.utils.security.get_rate_limiter"),
+            patch("src.mcp_server.utils.audit.get_audit_logger"),
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager") as mock_git_manager_class,
+            patch("src.mcp_server.services.state_service.StateService") as mock_state_service_class,
+            patch("src.mcp_server.tools.mcp_tools"),
+            patch("src.mcp_server.mcp_server.app.run") as mock_app_run,
+        ):
 
             mock_git_manager = MagicMock()
             mock_git_manager_class.return_value = mock_git_manager
@@ -191,16 +221,21 @@ class TestMainEntryPoint:
         """Test that available MCP tools are logged."""
         state_repo, transition_repo = mock_repositories
 
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging'), \
-             patch('src.mcp_server.utils.logging.get_logger') as mock_get_logger, \
-             patch('src.mcp_server.utils.security.get_rate_limiter'), \
-             patch('src.mcp_server.utils.audit.get_audit_logger'), \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager'), \
-             patch('src.mcp_server.services.state_service.StateService'), \
-             patch('src.mcp_server.tools.mcp_tools'), \
-             patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging"),
+            patch("src.mcp_server.utils.logging.get_logger") as mock_get_logger,
+            patch("src.mcp_server.utils.security.get_rate_limiter"),
+            patch("src.mcp_server.utils.audit.get_audit_logger"),
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager"),
+            patch("src.mcp_server.services.state_service.StateService"),
+            patch("src.mcp_server.tools.mcp_tools"),
+            patch("src.mcp_server.mcp_server.app.run") as mock_app_run,
+        ):
 
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
@@ -237,19 +272,23 @@ class TestMainLoggingSetup:
         transition_repo.count.return_value = 0
         return state_repo, transition_repo
 
-
     def test_setup_logging_with_debug_level(self, mock_settings, mock_repositories):
         """Test that logging is set up with the configured level."""
-        with patch('src.mcp_server.config.get_settings', return_value=mock_settings), \
-             patch('src.mcp_server.utils.logging.setup_logging') as mock_setup_logging, \
-             patch('src.mcp_server.utils.logging.get_logger'), \
-             patch('src.mcp_server.utils.security.get_rate_limiter'), \
-             patch('src.mcp_server.utils.audit.get_audit_logger'), \
-             patch('src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories', return_value=mock_repositories), \
-             patch('src.mcp_server.services.git_manager.GitManager'), \
-             patch('src.mcp_server.services.state_service.StateService'), \
-             patch('src.mcp_server.tools.mcp_tools'), \
-             patch('src.mcp_server.mcp_server.app.run') as mock_app_run:
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging") as mock_setup_logging,
+            patch("src.mcp_server.utils.logging.get_logger"),
+            patch("src.mcp_server.utils.security.get_rate_limiter"),
+            patch("src.mcp_server.utils.audit.get_audit_logger"),
+            patch(
+                "src.mcp_server.repositories.sqlite_repository.create_sqlite_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager"),
+            patch("src.mcp_server.services.state_service.StateService"),
+            patch("src.mcp_server.tools.mcp_tools"),
+            patch("src.mcp_server.mcp_server.app.run") as mock_app_run,
+        ):
 
             from src.mcp_server.__main__ import main
 
@@ -268,10 +307,10 @@ class TestMainSysPath:
         import sys
         from pathlib import Path
 
-        module_path = Path("/home/einar/Documentos/codebase_state_manager_mcp/src/mcp_server/__main__.py")
-        spec = importlib.util.spec_from_file_location(
-            "__main__", str(module_path)
+        module_path = Path(
+            "/home/einar/Documentos/codebase_state_manager_mcp/src/mcp_server/__main__.py"
         )
+        spec = importlib.util.spec_from_file_location("__main__", str(module_path))
         assert spec is not None, "Module spec should not be None"
         module = importlib.util.module_from_spec(spec)
 

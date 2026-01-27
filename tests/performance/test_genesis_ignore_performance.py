@@ -52,7 +52,7 @@ class TestGenesisIgnorePerformance:
             results = []
             for path in test_paths * 100:  # Test 1500 path evaluations
                 # Determine if it's a directory (simple heuristic)
-                is_dir = not '.' in Path(path).name or path.endswith('/')
+                is_dir = not "." in Path(path).name or path.endswith("/")
                 results.append(ignore_func(path, is_dir))
 
             end_time = time.time()
@@ -120,7 +120,7 @@ class TestGenesisIgnorePerformance:
 
                 # Check directories (but don't modify dirs for this test - we want to count all)
                 for d in dirs:
-                    rel_path = rel_root / d if rel_root != Path('.') else Path(d)
+                    rel_path = rel_root / d if rel_root != Path(".") else Path(d)
                     if ignore_func(str(rel_path), True):
                         ignored_count += 1
                     else:
@@ -128,7 +128,7 @@ class TestGenesisIgnorePerformance:
 
                 # Check files
                 for f in files:
-                    rel_path = rel_root / f if rel_root != Path('.') else Path(f)
+                    rel_path = rel_root / f if rel_root != Path(".") else Path(f)
                     if ignore_func(str(rel_path), False):
                         ignored_count += 1
                     else:
@@ -138,4 +138,6 @@ class TestGenesisIgnorePerformance:
             # With 50 packages × (1 package.json + 1 index.js + 1 lib/main.js) = 150 ignored files
             # Plus the node_modules directory itself
             assert ignored_count > 100, f"Should ignore many node_modules files: {ignored_count}"
-            assert not_ignored_count >= 3, f"Should keep at least README and src files: {not_ignored_count}"
+            assert (
+                not_ignored_count >= 3
+            ), f"Should keep at least README and src files: {not_ignored_count}"

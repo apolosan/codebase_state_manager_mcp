@@ -226,7 +226,10 @@ class TestStateServiceTransitionEdgeCases:
             with patch("src.mcp_server.services.state_service.sanitize_prompt") as mock_sanitize:
                 mock_is_init.return_value = True
                 mock_sanitize.return_value = "Test prompt"
-                mock_git_manager.compute_changes_since_last_state.return_value = ('{"added": [], "modified": [], "deleted": [], "content_diffs": {}}', {})
+                mock_git_manager.compute_changes_since_last_state.return_value = (
+                    '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+                    {},
+                )
 
                 success, state, message = service.new_state_transition("Test prompt")
 
