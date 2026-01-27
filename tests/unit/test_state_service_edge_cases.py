@@ -192,8 +192,13 @@ class TestStateServiceTransitionEdgeCases:
     def test_new_state_transition_create_fails(self):
         """Test new_state_transition when state creation fails."""
         mock_state_repo = Mock()
+        mock_state_repo.create_next = Mock(return_value=True)
+        mock_state_repo.delete = Mock(return_value=True)
+        mock_state_repo.create = Mock(side_effect=[True, True])
         mock_transition_repo = Mock()
-        mock_transition_repo.count.return_value = 0
+        mock_transition_repo.count = Mock(return_value=0)
+        mock_transition_repo.create_next = Mock(return_value=False)
+        mock_transition_repo.create = Mock(return_value=False)
         mock_git_manager = Mock()
         mock_settings = Mock()
         mock_settings.docker_volume_name = "/tmp/volume"
@@ -209,12 +214,9 @@ class TestStateServiceTransitionEdgeCases:
         mock_genesis_state.file_hashes = {"genesis.py": "genesis_hash"}
         mock_genesis_state.file_hash_deltas = {"genesis.py": "genesis_hash"}
 
-        mock_state_repo.get_current.return_value = mock_current_state
-        mock_state_repo.get_by_number.return_value = mock_genesis_state
-        mock_state_repo.count.return_value = 1
-        mock_state_repo.create.side_effect = [True, True]
-
-        mock_transition_repo.create.return_value = False
+        mock_state_repo.get_current = Mock(return_value=mock_current_state)
+        mock_state_repo.get_by_number = Mock(return_value=mock_genesis_state)
+        mock_state_repo.count = Mock(return_value=1)
 
         service = StateService(
             mock_state_repo, mock_transition_repo, mock_git_manager, mock_settings
@@ -355,8 +357,13 @@ class TestStateServiceArbitraryTransitionEdgeCases:
     def test_arbitrary_transition_create_fails(self):
         """Test arbitrary_state_transition when transition creation fails."""
         mock_state_repo = Mock()
+        mock_state_repo.create_next = Mock(return_value=True)
+        mock_state_repo.delete = Mock(return_value=True)
+        mock_state_repo.create = Mock(return_value=True)
         mock_transition_repo = Mock()
-        mock_transition_repo.count.return_value = 0
+        mock_transition_repo.count = Mock(return_value=0)
+        mock_transition_repo.create_next = Mock(return_value=False)
+        mock_transition_repo.create = Mock(return_value=False)
         mock_git_manager = Mock()
         mock_settings = Mock()
         mock_settings.docker_volume_name = "/tmp/volume"
@@ -369,10 +376,9 @@ class TestStateServiceArbitraryTransitionEdgeCases:
         mock_target_state.state_number = 5
         mock_target_state.user_prompt = "Arbitrary transition"
 
-        mock_state_repo.get_current.return_value = mock_current_state
-        mock_state_repo.count.return_value = 6
-        mock_state_repo.get_by_number.return_value = mock_target_state
-        mock_transition_repo.create.return_value = False
+        mock_state_repo.get_current = Mock(return_value=mock_current_state)
+        mock_state_repo.count = Mock(return_value=6)
+        mock_state_repo.get_by_number = Mock(return_value=mock_target_state)
 
         service = StateService(
             mock_state_repo, mock_transition_repo, mock_git_manager, mock_settings

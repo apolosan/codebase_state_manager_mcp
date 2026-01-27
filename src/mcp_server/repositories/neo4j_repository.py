@@ -7,6 +7,7 @@ from neo4j import Driver, GraphDatabase
 from ..config import Settings
 from ..models.state_model import State, Transition
 from ..repositories.abstract_repositories import StateRepository, TransitionRepository
+from ..utils.hash import generate_state_hash
 
 
 class Neo4jStateRepository(StateRepository):
@@ -173,6 +174,79 @@ class Neo4jStateRepository(StateRepository):
             )
             return [record["state_number"] for record in result]
 
+    def delete(self, state_number: int) -> bool:
+        with self.driver.session() as session:
+            try:
+                result = session.run(
+                    """
+                    MATCH (s:State {state_number: $state_number})
+                    DELETE s
+                    RETURN COUNT(s) AS deleted
+                    """,
+                    state_number=state_number,
+                )
+                record = result.single()
+                return record is not None and record["deleted"] > 0
+            except Exception:
+                return False
+
+    def create_next(self, state: State) -> bool:
+        """Create a new state with the next sequential state number."""
+        with self.driver.session() as session:
+            try:
+                # Use write transaction for atomicity
+                def create_tx(tx):
+                    # Get current maximum state number
+                    result = tx.run("MATCH (s:State) RETURN MAX(s.state_number) AS max_state")
+                    record = result.single()
+                    max_state = (
+                        record["max_state"] if record and record["max_state"] is not None else -1
+                    )
+                    next_state_number = max_state + 1
+
+                    # Generate hash with the correct state number
+                    state_hash = generate_state_hash(
+                        state.user_prompt,
+                        state.branch_name,
+                        state.git_diff_info,
+                        next_state_number,
+                    )
+
+                    # Create the new state node
+                    result = tx.run(
+                        """
+                        CREATE (new:State {
+                            state_number: $state_number,
+                            user_prompt: $user_prompt,
+                            branch_name: $branch_name,
+                            git_diff_info: $git_diff_info,
+                            hash: $hash,
+                            created_at: $created_at,
+                            file_hash_deltas: $file_hash_deltas
+                        })
+                        RETURN new.state_number AS state_number
+                        """,
+                        state_number=next_state_number,
+                        user_prompt=state.user_prompt,
+                        branch_name=state.branch_name,
+                        git_diff_info=state.git_diff_info,
+                        hash=state_hash,
+                        created_at=state.created_at.isoformat() if state.created_at else None,
+                        file_hash_deltas=(
+                            json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
+                        ),
+                    )
+                    record = result.single()
+                    if record:
+                        state.state_number = record["state_number"]
+                        state.hash = state_hash
+                        return True
+                    return False
+
+                return session.execute_write(create_tx)
+            except Exception:
+                return False
+
 
 class Neo4jTransitionRepository(TransitionRepository):
     def __init__(self, driver: Driver, settings: Settings) -> None:
@@ -202,6 +276,48 @@ class Neo4jTransitionRepository(TransitionRepository):
                 return result.single() is not None
             except Exception:
                 return False
+
+    def create_next(self, transition: Transition) -> bool:
+        """Create a new transition with the next sequential transition ID."""
+        with self.driver.session() as session:
+            try:
+                # Use write transaction for atomicity
+                result = session.execute_write(self._create_next_transaction, transition)
+                return result
+            except Exception:
+                return False
+
+    def _create_next_transaction(self, tx, transition: Transition) -> bool:
+        """Transaction function for create_next."""
+        # Get current maximum transition ID
+        max_result = tx.run("MATCH ()-[t:TRANSITION]->() RETURN MAX(t.transition_id) AS max_id")
+        max_record = max_result.single()
+        max_id = max_record["max_id"] if max_record and max_record["max_id"] is not None else 0
+        next_id = max_id + 1
+
+        # Create transition with new ID
+        result = tx.run(
+            """
+            MERGE (from:State {state_number: $current_state})
+            MERGE (to:State {state_number: $next_state})
+            CREATE (from)-[t:TRANSITION {
+                transition_id: $transition_id,
+                user_prompt: $user_prompt,
+                timestamp: $timestamp
+            }]->(to)
+            RETURN t
+            """,
+            transition_id=next_id,
+            current_state=transition.current_state,
+            next_state=transition.next_state,
+            user_prompt=transition.user_prompt,
+            timestamp=transition.timestamp.isoformat() if transition.timestamp else None,
+        )
+        if result.single():
+            # Update the transition object with the new ID
+            transition.transition_id = next_id
+            return True
+        return False
 
     def get_by_id(self, transition_id: int) -> Optional[Transition]:
         with self.driver.session() as session:

@@ -2,9 +2,11 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from ..utils.hash import generate_state_hash
 
 if TYPE_CHECKING:
     from sqlalchemy.orm.decl_api import DeclarativeMeta
@@ -180,6 +182,72 @@ class SQLiteStateRepository(StateRepository):
         finally:
             session.close()
 
+    def delete(self, state_number: int) -> bool:
+        session = self.session_factory()
+        try:
+            result = session.query(StateModel).filter_by(state_number=state_number).delete()
+            session.commit()
+            return result > 0
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    def create_next(self, state: State) -> bool:
+        """Create a new state with the next sequential state number."""
+        session = self.session_factory()
+        try:
+            # Acquire exclusive lock to prevent race conditions
+            session.execute("BEGIN IMMEDIATE")
+
+            # Get current maximum state number
+            max_state = session.query(func.max(StateModel.state_number)).scalar()
+            next_state_number = (max_state + 1) if max_state is not None else 0
+
+            # Check if state with this number already exists (should not happen with lock)
+            existing = session.query(StateModel).filter_by(state_number=next_state_number).first()
+            if existing:
+                session.rollback()
+                return False
+
+            # Update the state object with the new number
+            state.state_number = next_state_number
+
+            # Generate hash with the correct state number
+            state.hash = generate_state_hash(
+                state.user_prompt,
+                state.branch_name,
+                state.git_diff_info,
+                state.state_number,
+            )
+
+            # Convert file hashes to JSON
+            file_hashes_json = json.dumps(state.file_hashes) if state.file_hashes else None
+            file_hash_deltas_json = (
+                json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
+            )
+
+            # Create model and persist
+            state_model = StateModel(
+                state_number=state.state_number,
+                user_prompt=state.user_prompt,
+                branch_name=state.branch_name,
+                git_diff_info=state.git_diff_info,
+                hash=state.hash,
+                created_at=state.created_at,
+                file_hashes=file_hashes_json,
+                file_hash_deltas=file_hash_deltas_json,
+            )
+            session.add(state_model)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
 
 class SQLiteTransitionRepository(TransitionRepository):
     def __init__(self, session_factory: sessionmaker, settings: Settings) -> None:
@@ -196,6 +264,43 @@ class SQLiteTransitionRepository(TransitionRepository):
             existing = session.query(TransitionModel).filter_by(id=transition.transition_id).first()
             if existing:
                 return True
+            transition_model = TransitionModel(
+                id=transition.transition_id,
+                current_state=transition.current_state,
+                next_state=transition.next_state,
+                user_prompt=transition.user_prompt,
+                timestamp=transition.timestamp,
+            )
+            session.add(transition_model)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    def create_next(self, transition: Transition) -> bool:
+        """Create a new transition with the next sequential transition ID."""
+        session = self.session_factory()
+        try:
+            # Acquire exclusive lock to prevent race conditions
+            session.execute("BEGIN IMMEDIATE")
+
+            # Get current maximum transition ID
+            max_id = session.query(func.max(TransitionModel.id)).scalar()
+            next_id = (max_id + 1) if max_id is not None else 1
+
+            # Check if transition with this ID already exists (should not happen with lock)
+            existing = session.query(TransitionModel).filter_by(id=next_id).first()
+            if existing:
+                session.rollback()
+                return False
+
+            # Update the transition object with the new ID
+            transition.transition_id = next_id
+
+            # Create model and persist
             transition_model = TransitionModel(
                 id=transition.transition_id,
                 current_state=transition.current_state,

@@ -51,12 +51,30 @@ class TestCWE78_OSCommandInjection:
         def count(self):
             return len(self.states)
 
+        def create_next(self, state):
+            # Find next sequential number
+            max_num = max(self.states.keys()) if self.states else -1
+            next_num = max_num + 1
+            state.state_number = next_num
+            # Generate a simple hash for testing
+            state.hash = f"hash{next_num}"
+            self.states[next_num] = state
+            return True
+
     class MockTransitionRepository:
         def __init__(self):
             self.transitions = {}
 
         def create(self, t):
             self.transitions[str(t.transition_id)] = t
+            return True
+
+        def create_next(self, transition):
+            # Find next sequential ID
+            max_id = max([int(k) for k in self.transitions.keys()]) if self.transitions else 0
+            next_id = max_id + 1
+            transition.transition_id = next_id
+            self.transitions[str(next_id)] = transition
             return True
 
     @pytest.fixture

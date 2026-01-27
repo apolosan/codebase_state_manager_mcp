@@ -43,6 +43,22 @@ class MockStateRepository:
             s.state_number for s in self.states.values() if text.lower() in s.user_prompt.lower()
         ]
 
+    def delete(self, state_number):
+        if state_number in self.states:
+            del self.states[state_number]
+            return True
+        return False
+
+    def create_next(self, state):
+        # Find next sequential number
+        max_num = max(self.states.keys()) if self.states else -1
+        next_num = max_num + 1
+        state.state_number = next_num
+        # Generate a simple hash for testing
+        state.hash = f"hash{next_num}"
+        self.states[next_num] = state
+        return True
+
 
 class MockTransitionRepository:
     def __init__(self):
@@ -50,6 +66,14 @@ class MockTransitionRepository:
 
     def create(self, transition):
         self.transitions[str(transition.transition_id)] = transition
+        return True
+
+    def create_next(self, transition):
+        # Find next sequential ID
+        max_id = max([int(k) for k in self.transitions.keys()]) if self.transitions else 0
+        next_id = max_id + 1
+        transition.transition_id = next_id
+        self.transitions[str(next_id)] = transition
         return True
 
     def get_by_id(self, transition_id):
