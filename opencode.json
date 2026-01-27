@@ -79,7 +79,7 @@
         "bunx",
         "@gianpieropuleo/radix-mcp-server@latest",
         "--github-api-key",
-        "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"
+        "{env:GH}"
       ],
       "enabled": false
     },
