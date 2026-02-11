@@ -14,6 +14,7 @@ class MockStateRepository:
     def __init__(self):
         self.states = {}
         self._initialized = False
+        self._current_state = None
 
     def create(self, state: State) -> bool:
         self.states[state.state_number] = state
@@ -23,6 +24,8 @@ class MockStateRepository:
         return self.states.get(state_number)
 
     def get_current(self):
+        if self._current_state is not None:
+            return self.states.get(self._current_state)
         if not self.states:
             return None
         max_num = max(self.states.keys())
@@ -54,6 +57,12 @@ class MockStateRepository:
         # Generate a simple hash for testing
         state.hash = f"hash{next_num}"
         self.states[next_num] = state
+        return True
+
+    def set_current(self, state_number: int) -> bool:
+        if state_number not in self.states:
+            return False
+        self._current_state = state_number
         return True
 
 

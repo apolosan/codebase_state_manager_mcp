@@ -35,6 +35,7 @@ class TestCWE78_OSCommandInjection:
     class MockStateRepository:
         def __init__(self):
             self.states = {}
+            self._current_state = None
 
         def create(self, state):
             self.states[state.state_number] = state
@@ -44,6 +45,8 @@ class TestCWE78_OSCommandInjection:
             return self.states.get(n)
 
         def get_current(self):
+            if self._current_state is not None:
+                return self.states.get(self._current_state)
             if not self.states:
                 return None
             return max(self.states.values(), key=lambda s: s.state_number)
@@ -59,6 +62,12 @@ class TestCWE78_OSCommandInjection:
             # Generate a simple hash for testing
             state.hash = f"hash{next_num}"
             self.states[next_num] = state
+            return True
+
+        def set_current(self, state_number: int) -> bool:
+            if state_number not in self.states:
+                return False
+            self._current_state = state_number
             return True
 
     class MockTransitionRepository:

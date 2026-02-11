@@ -1,3 +1,4 @@
+from .branch_utils import sanitize_branch_name
 from .hash import generate_state_hash, validate_state_hash
 from .init_manager import is_initialized, set_initialized
 from .logging import (
@@ -10,6 +11,7 @@ from .logging import (
 from .metrics import PerformanceMonitor, Timer, get_metrics, timed_operation
 
 __all__ = [
+    "sanitize_branch_name",
     "generate_state_hash",
     "validate_state_hash",
     "is_initialized",

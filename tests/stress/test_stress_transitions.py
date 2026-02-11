@@ -61,6 +61,12 @@ class MockStateRepository:
         self._current = state
         return True
 
+    def set_current(self, state_number: int) -> bool:
+        if state_number not in self.states:
+            return False
+        self._current = self.states[state_number]
+        return True
+
 
 class MockTransitionRepository:
     def __init__(self):

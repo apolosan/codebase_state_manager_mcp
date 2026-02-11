@@ -95,6 +95,14 @@ class Neo4jStateRepository(StateRepository):
 
     def get_current(self) -> Optional[State]:
         with self.driver.session() as session:
+            metadata_result = session.run("""
+                MATCH (m:Metadata {key: 'current_state'})
+                RETURN m.state_number AS state_number
+                """)
+            metadata_record = metadata_result.single()
+            if metadata_record and metadata_record["state_number"]:
+                return self.get_by_number(metadata_record["state_number"])
+
             result = session.run("""
                 MATCH (s:State)
                 WITH s.state_number AS sn
@@ -244,6 +252,28 @@ class Neo4jStateRepository(StateRepository):
                     return False
 
                 return session.execute_write(create_tx)
+            except Exception:
+                return False
+
+    def set_current(self, state_number: int) -> bool:
+        """Set the current state explicitly for arbitrary transitions."""
+        with self.driver.session() as session:
+            try:
+                state_exists = session.run(
+                    "MATCH (s:State {state_number: $state_number}) RETURN COUNT(s) AS count",
+                    state_number=state_number,
+                ).single()
+                if not state_exists or state_exists["count"] == 0:
+                    return False
+
+                session.run(
+                    """
+                    MERGE (m:Metadata {key: 'current_state'})
+                    SET m.state_number = $state_number
+                    """,
+                    state_number=state_number,
+                )
+                return True
             except Exception:
                 return False
 

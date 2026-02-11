@@ -168,5 +168,9 @@ volumes/
 # Memory MCP
 .aim/
 .opencode/
+.agent/
 
+.data/
 data/
+
+.chunkhound.json

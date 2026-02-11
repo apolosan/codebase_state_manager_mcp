@@ -30,6 +30,12 @@ class StateModel(Base):
     file_hash_deltas = Column(Text, nullable=True)
 
 
+class MetadataModel(Base):
+    __tablename__ = "metadata"
+    key = Column(String(255), primary_key=True)
+    value = Column(String(255), nullable=False)
+
+
 class TransitionModel(Base):
     __tablename__ = "transitions"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -105,6 +111,11 @@ class SQLiteStateRepository(StateRepository):
     def get_current(self) -> Optional[State]:
         session = self.session_factory()
         try:
+            metadata = session.query(MetadataModel).filter_by(key="current_state").first()
+            if metadata:
+                state_number = int(metadata.value)
+                return self.get_by_number(state_number)
+
             state_model = session.query(StateModel).order_by(StateModel.state_number.desc()).first()
             if state_model:
                 file_hashes = {}
@@ -235,6 +246,25 @@ class SQLiteStateRepository(StateRepository):
                 file_hash_deltas=file_hash_deltas_json,
             )
             session.add(state_model)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    def set_current(self, state_number: int) -> bool:
+        """Set the current state explicitly for arbitrary transitions."""
+        session = self.session_factory()
+        try:
+            state_exists = session.query(StateModel).filter_by(state_number=state_number).first()
+            if not state_exists:
+                return False
+
+            session.query(MetadataModel).filter_by(key="current_state").delete()
+            metadata = MetadataModel(key="current_state", value=str(state_number))
+            session.add(metadata)
             session.commit()
             return True
         except Exception:

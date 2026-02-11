@@ -1,7 +1,8 @@
 """Pytest configuration for SQLite integration tests."""
 
-import pytest
 import gc
+
+import pytest
 
 
 @pytest.fixture(autouse=True)

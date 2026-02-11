@@ -325,4 +325,4 @@ O **codebase-state-manager-mcp** é um projeto robusto e bem arquiteturado, pron
 
 *Relatório gerado em: 21/01/2026*
 *Analista: Sistema de IA*
-*Versão do projeto: 0.1.0*
+*Versão do projeto: 0.1.1*

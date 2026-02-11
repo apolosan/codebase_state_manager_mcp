@@ -10,6 +10,13 @@
       ],
       "enabled": true
     },
+    "desktop-commander": {
+      "type": "local",
+      "command": ["bunx",
+        "-y",
+        "@wonderwhy-er/desktop-commander@latest"],
+      "enabled": true
+    },
     "arxiv": {
       "type": "local",
       "command": [
@@ -21,6 +28,14 @@
         "/home/einar/Downloads/radoc/papers:/app/papers",
         "arxiv-mcp-server:local"
       ],
+      "enabled": true
+    },
+    "chunkhound": {
+      "type": "local",
+      "command": ["chunkhound", "mcp", "--db", "./.data/chunks.duckdb", "--config", ".chunkhound.json", "--stdio", "$(pwd)", "--llm-api-key", "{env:OPENAI_API_KEY}", "--embedding-api-key", "{env:OPENAI_API_KEY}"],
+      "environment": {
+        "CHUNKHOUND_EMBEDDING__API_KEY": "{env:OPENAI_API_KEY}"
+      },
       "enabled": true
     },
     "memory": {
@@ -44,13 +59,18 @@
     },
     "desktop-commander": {
       "type": "local",
-      "command": ["bunx", "-y", "@wonderwhy-er/desktop-commander@latest"],
+      "command": ["npx", "-y", "@wonderwhy-er/desktop-commander@latest"],
       "enabled": true
     },
     "taskmanager": {
       "type": "local",
-      "command": ["bunx", "-y", "@kazuph/mcp-taskmanager"],
-      "enabled": false
+      "command": ["bun", "/home/einar/Documentos/mcp-shrimp-task-manager/dist/index.js"],
+      "enabled": true,
+      "environment": {
+        "DATA_DIR": "/home/einar/Documentos/codebase_state_manager_mcp/.data/",
+        "TEMPLATES_USE": "en",
+        "ENABLE_GUI": "false"
+      }
     },
     "knip": {
       "type": "local",
@@ -83,6 +103,11 @@
       ],
       "enabled": false
     },
+    "ripgrep": {
+      "type": "local",
+      "command": ["bunx", "-y", "mcp-ripgrep@latest"],
+      "enabled": true
+    },
     "flyonui": {
       "type": "local",
       "command": ["flyonui-mcp"],
@@ -102,6 +127,16 @@
         "@spotlightjs/spotlight@latest",
         "mcp"
       ],
+      "enabled": true
+    },
+    "codemod": {
+      "type": "local",
+      "command": ["bunx", "codemod@latest", "mcp"],
+      "enabled": true
+    },
+    "grep": {
+      "type": "remote",
+      "url": "https://mcp.grep.app",
       "enabled": true
     },
     "codebase-state-manager": {

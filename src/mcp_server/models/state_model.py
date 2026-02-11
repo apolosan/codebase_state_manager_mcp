@@ -1,10 +1,23 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Dict, Optional
 
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class BranchState(str, Enum):
+    """Standardized branch states for state tracking.
+
+    These values are used when the actual branch name cannot be determined
+    from the git repository.
+    """
+
+    NOT_VERSIONED = "not_versioned"
+    GIT_ERROR = "git_error"
+    DETACHED_HEAD = "detached_head"
 
 
 class State:

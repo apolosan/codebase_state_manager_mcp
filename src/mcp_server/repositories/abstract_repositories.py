@@ -48,6 +48,16 @@ class StateRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def set_current(self, state_number: int) -> bool:
+        """Set the current state explicitly.
+
+        Used by arbitrary_state_transition to update the current state pointer
+        when navigating to a non-sequential state.
+        Returns True if successful, False otherwise.
+        """
+        pass
+
 
 class TransitionRepository(ABC):
     @abstractmethod

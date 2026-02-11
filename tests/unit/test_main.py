@@ -1,10 +1,11 @@
 """Tests for __main__.py entry point."""
 
-import pytest
-from unittest.mock import MagicMock, patch
-from io import StringIO
 import sys
+from io import StringIO
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestMainEntryPoint:

@@ -1,12 +1,13 @@
-import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.mcp_server.models.state_model import State
 from src.mcp_server.services.git_manager import GitManager
 from src.mcp_server.services.state_service import StateService
-from src.mcp_server.models.state_model import State
 
 
 class TestDeltaStorage:
