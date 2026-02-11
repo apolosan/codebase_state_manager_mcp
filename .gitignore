@@ -110,6 +110,34 @@ ENV/
 env.bak/
 venv.bak/
 
+*.md
+!INSTALL.md
+!README.md
+!README_DEPLOY.md
+
+# Dependency directories
+node_modules/
+.vscode
+# OS specific
+
+# Task files
+opencode.json
+tasks.json
+tasks/ 
+
+.backup/*
+.backups/
+.claude/
+.opencode/
+.opencode/*
+.cursor/
+.cursor/*
+.mcp.backup.json
+.mcp.json
+.mcp.mcp-proxy.json
+.mcp_old.json
+.chunkhound.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
