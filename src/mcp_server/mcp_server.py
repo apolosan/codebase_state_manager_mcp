@@ -190,6 +190,154 @@ async def get_current_state_transitions_tool() -> dict:
     return result
 
 
+@app.tool()
+async def check_consistency_tool() -> dict:
+    """Check system consistency and report any issues found.
+
+    Checks for:
+    - Initialization flag consistency with database state
+    - Database accessibility
+    - Volume path existence
+    - Current state pointer validity
+    - State sequence integrity
+
+    Returns:
+        dict with:
+        - success: bool
+        - issues: list of issues found (each with severity, category, message)
+        - summary: human-readable summary
+    """
+    from .utils.consistency_checker import ConsistencyChecker
+
+    try:
+        checker = ConsistencyChecker(
+            state_repo=state_repo,
+            volume_path=settings.docker_volume_name,
+            db_path=settings.sqlite_path,
+        )
+        issues = checker.check_all()
+
+        if not issues:
+            return {
+                "success": True,
+                "issues": [],
+                "summary": "✓ No consistency issues found. System is healthy.",
+            }
+
+        issues_list = [
+            {
+                "severity": issue.severity,
+                "category": issue.category,
+                "message": issue.message,
+                "auto_fixable": issue.auto_fixable,
+            }
+            for issue in issues
+        ]
+
+        critical_count = sum(1 for i in issues if i.severity == "critical")
+        error_count = sum(1 for i in issues if i.severity == "error")
+        warning_count = sum(1 for i in issues if i.severity == "warning")
+        auto_fixable_count = sum(1 for i in issues if i.auto_fixable)
+
+        summary_parts = []
+        if critical_count:
+            summary_parts.append(f"{critical_count} critical")
+        if error_count:
+            summary_parts.append(f"{error_count} error(s)")
+        if warning_count:
+            summary_parts.append(f"{warning_count} warning(s)")
+
+        summary = f"Found {len(issues)} issue(s): {', '.join(summary_parts)}"
+        if auto_fixable_count:
+            summary += f" ({auto_fixable_count} auto-fixable)"
+
+        return {"success": True, "issues": issues_list, "summary": summary}
+    except Exception as e:
+        return {"success": False, "error": str(e), "summary": f"Failed to check consistency: {e}"}
+
+
+@app.tool()
+async def repair_consistency_tool() -> dict:
+    """Attempt to automatically repair consistency issues.
+
+    This tool will:
+    1. Check for consistency issues
+    2. Attempt to auto-repair fixable issues
+    3. Re-check to verify repairs
+
+    Returns:
+        dict with:
+        - success: bool
+        - repaired: list of successfully repaired issues
+        - failed: list of issues that couldn't be repaired
+        - remaining_issues: list of issues still present after repair
+        - summary: human-readable summary
+    """
+    from .utils.consistency_checker import ConsistencyChecker
+
+    try:
+        checker = ConsistencyChecker(
+            state_repo=state_repo,
+            volume_path=settings.docker_volume_name,
+            db_path=settings.sqlite_path,
+        )
+
+        # Check for issues
+        issues = checker.check_all()
+
+        if not issues:
+            return {
+                "success": True,
+                "repaired": [],
+                "failed": [],
+                "remaining_issues": [],
+                "summary": "✓ No consistency issues found. Nothing to repair.",
+            }
+
+        # Attempt repairs
+        repair_results = checker.auto_repair()
+
+        repaired = []
+        failed = []
+        for issue_msg, success in repair_results.items():
+            if success:
+                repaired.append(issue_msg)
+            else:
+                failed.append(issue_msg)
+
+        # Re-check
+        remaining_issues = checker.check_all()
+        remaining_list = [
+            {
+                "severity": issue.severity,
+                "category": issue.category,
+                "message": issue.message,
+                "auto_fixable": issue.auto_fixable,
+            }
+            for issue in remaining_issues
+        ]
+
+        summary_parts = []
+        if repaired:
+            summary_parts.append(f"✓ Repaired {len(repaired)} issue(s)")
+        if failed:
+            summary_parts.append(f"✗ Failed to repair {len(failed)} issue(s)")
+        if remaining_issues:
+            summary_parts.append(f"⚠ {len(remaining_issues)} issue(s) remain")
+        else:
+            summary_parts.append("✓ All issues resolved")
+
+        return {
+            "success": True,
+            "repaired": repaired,
+            "failed": failed,
+            "remaining_issues": remaining_list,
+            "summary": "; ".join(summary_parts),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "summary": f"Failed to repair consistency: {e}"}
+
+
 # Debug: print registered tools
 import logging
 
@@ -207,6 +355,8 @@ registered_tool_names = [
     "new_state_transition_tool",
     "get_current_state_info_tool",
     "search_states_tool",
+    "check_consistency_tool",
+    "repair_consistency_tool",
 ]
 logger.info(f"Manually registered tool functions: {registered_tool_names}")
 

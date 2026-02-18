@@ -1,12 +1,17 @@
 import json
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from ..utils.hash import generate_state_hash
+from ..utils.retry import retry_on_lock
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm.decl_api import DeclarativeMeta
@@ -205,11 +210,21 @@ class SQLiteStateRepository(StateRepository):
         finally:
             session.close()
 
+    @retry_on_lock(max_retries=5)
     def create_next(self, state: State) -> bool:
-        """Create a new state with the next sequential state number."""
+        """Create a new state with the next sequential state number.
+
+        Returns:
+            bool: True if state created successfully, False otherwise.
+
+        Logs:
+            - ERROR: SQLite lock contention (OperationalError)
+            - ERROR: Any other database exception with full traceback
+        """
         from sqlalchemy import text
 
         session = self.session_factory()
+        next_state_number = None  # Initialize for error logging
         try:
             session.execute(text("BEGIN IMMEDIATE"))
 
@@ -218,6 +233,10 @@ class SQLiteStateRepository(StateRepository):
 
             existing = session.query(StateModel).filter_by(state_number=next_state_number).first()
             if existing:
+                logger.warning(
+                    f"State {next_state_number} already exists. "
+                    f"Possible race condition or failed previous transaction."
+                )
                 session.rollback()
                 return False
 
@@ -247,28 +266,78 @@ class SQLiteStateRepository(StateRepository):
             )
             session.add(state_model)
             session.commit()
+            logger.info(f"Successfully created state {state.state_number}")
             return True
-        except Exception:
+        except OperationalError as e:
             session.rollback()
+            error_msg = str(e)
+            state_info = (
+                f"state {next_state_number}" if next_state_number is not None else "new state"
+            )
+            if "database is locked" in error_msg.lower():
+                logger.error(
+                    f"SQLite database locked when creating {state_info}. "
+                    f"Another process may be holding a lock. Error: {error_msg}"
+                )
+            else:
+                logger.error(
+                    f"SQLite operational error creating {state_info}: {error_msg}", exc_info=True
+                )
+            return False
+        except Exception as e:
+            session.rollback()
+            state_info = (
+                f"state {next_state_number}" if next_state_number is not None else "new state"
+            )
+            logger.error(
+                f"Unexpected error creating {state_info}: {type(e).__name__}: {e}", exc_info=True
+            )
             return False
         finally:
             session.close()
 
+    @retry_on_lock(max_retries=5)
     def set_current(self, state_number: int) -> bool:
-        """Set the current state explicitly for arbitrary transitions."""
+        """Set the current state explicitly for arbitrary transitions.
+
+        Args:
+            state_number: The state number to set as current.
+
+        Returns:
+            bool: True if updated successfully, False otherwise.
+
+        Logs:
+            - WARNING: State does not exist
+            - ERROR: Database exceptions with full traceback
+        """
         session = self.session_factory()
         try:
             state_exists = session.query(StateModel).filter_by(state_number=state_number).first()
             if not state_exists:
+                logger.warning(
+                    f"Cannot set current to state {state_number}: state does not exist in database"
+                )
                 return False
 
             session.query(MetadataModel).filter_by(key="current_state").delete()
             metadata = MetadataModel(key="current_state", value=str(state_number))
             session.add(metadata)
             session.commit()
+            logger.info(f"Successfully set current state to {state_number}")
             return True
-        except Exception:
+        except OperationalError as e:
             session.rollback()
+            logger.error(
+                f"SQLite operational error setting current state to {state_number}: {e}",
+                exc_info=True,
+            )
+            return False
+        except Exception as e:
+            session.rollback()
+            logger.error(
+                f"Unexpected error setting current state to {state_number}: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
             return False
         finally:
             session.close()
@@ -305,11 +374,21 @@ class SQLiteTransitionRepository(TransitionRepository):
         finally:
             session.close()
 
+    @retry_on_lock(max_retries=5)
     def create_next(self, transition: Transition) -> bool:
-        """Create a new transition with the next sequential transition ID."""
+        """Create a new transition with the next sequential transition ID.
+
+        Returns:
+            bool: True if transition created successfully, False otherwise.
+
+        Logs:
+            - ERROR: SQLite lock contention (OperationalError)
+            - ERROR: Any other database exception with full traceback
+        """
         from sqlalchemy import text
 
         session = self.session_factory()
+        next_id = None  # Initialize for error logging
         try:
             session.execute(text("BEGIN IMMEDIATE"))
 
@@ -318,6 +397,10 @@ class SQLiteTransitionRepository(TransitionRepository):
 
             existing = session.query(TransitionModel).filter_by(id=next_id).first()
             if existing:
+                logger.warning(
+                    f"Transition {next_id} already exists. "
+                    f"Possible race condition or failed previous transaction."
+                )
                 session.rollback()
                 return False
 
@@ -332,9 +415,31 @@ class SQLiteTransitionRepository(TransitionRepository):
             )
             session.add(transition_model)
             session.commit()
+            logger.info(
+                f"Successfully created transition {transition.transition_id} "
+                f"({transition.current_state} → {transition.next_state})"
+            )
             return True
-        except Exception:
+        except OperationalError as e:
             session.rollback()
+            error_msg = str(e)
+            trans_info = f"transition {next_id}" if next_id is not None else "new transition"
+            if "database is locked" in error_msg.lower():
+                logger.error(
+                    f"SQLite database locked when creating {trans_info}. "
+                    f"Another process may be holding a lock. Error: {error_msg}"
+                )
+            else:
+                logger.error(
+                    f"SQLite operational error creating {trans_info}: {error_msg}", exc_info=True
+                )
+            return False
+        except Exception as e:
+            session.rollback()
+            trans_info = f"transition {next_id}" if next_id is not None else "new transition"
+            logger.error(
+                f"Unexpected error creating {trans_info}: {type(e).__name__}: {e}", exc_info=True
+            )
             return False
         finally:
             session.close()

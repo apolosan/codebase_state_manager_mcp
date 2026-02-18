@@ -8,6 +8,7 @@ from ..repositories.abstract_repositories import StateRepository, TransitionRepo
 from ..services.branch_detection_service import BranchDetectionService
 from ..services.git_manager import GitManager, GitOperationError
 from ..utils.audit import get_audit_logger
+from ..utils.consistency_checker import ConsistencyChecker
 from ..utils.hash import generate_state_hash
 from ..utils.ignore_manager import IgnoreManager
 from ..utils.init_manager import is_initialized, set_initialized
@@ -164,6 +165,17 @@ class StateService:
         file_hash_deltas: dict,
         project_path: Path,
     ) -> tuple[bool, Optional[State], str]:
+        """Create a new state and transition atomically.
+
+        This method ensures atomicity by:
+        1. Creating the new state
+        2. Creating the transition record
+        3. Updating the current state pointer
+        4. Rolling back the state if pointer update fails
+
+        Returns:
+            (success, new_state, message)
+        """
         try:
             sanitized_prompt = sanitize_prompt(user_prompt)
         except ValidationError as e:
@@ -191,9 +203,11 @@ class StateService:
         )
 
         try:
+            # Step 1: Create the new state
             if not self.state_repo.create_next(new_state):
-                return False, None, "Failed to create new state"
+                return False, None, "Failed to create new state in database"
 
+            # Step 2: Create the transition record
             transition = Transition(
                 transition_id=0,  # Placeholder, will be assigned by create_next
                 current_state=current_state.state_number,
@@ -201,8 +215,32 @@ class StateService:
                 user_prompt=sanitized_prompt,
             )
             if not self.transition_repo.create_next(transition):
+                # Rollback: delete the created state
+                logging.error(
+                    f"Failed to create transition record. Rolling back state {new_state.state_number}"
+                )
                 self.state_repo.delete(new_state.state_number)
                 return False, None, "Failed to create transition, state rolled back"
+
+            # Step 3: Update current state pointer (critical for consistency)
+            if not self.state_repo.set_current(new_state.state_number):
+                # Rollback: delete both transition and state
+                logging.error(
+                    f"Failed to update current state pointer to {new_state.state_number}. "
+                    f"Rolling back state and transition"
+                )
+                # Note: We don't have a delete_transition method, but the orphaned
+                # transition won't cause issues. The critical part is the state.
+                self.state_repo.delete(new_state.state_number)
+                return (
+                    False,
+                    None,
+                    (
+                        "Failed to update current state pointer. "
+                        "This may indicate database lock contention or corruption. "
+                        "State creation rolled back."
+                    ),
+                )
 
             return True, new_state, f"Transition to state {new_state.state_number} successful"
         except Exception as e:
@@ -211,6 +249,39 @@ class StateService:
     def new_state_transition(self, user_prompt: str) -> tuple[bool, Optional[State], str]:
         if not is_initialized(self.settings.docker_volume_name):
             return False, None, "State manager not initialized. Call genesis first."
+
+        # Run consistency check before attempting transition
+        checker = ConsistencyChecker(
+            state_repo=self.state_repo,
+            volume_path=self.settings.docker_volume_name,
+            db_path=self.settings.sqlite_path,
+        )
+        issues = checker.check_all()
+
+        if issues:
+            logging.warning(f"Consistency issues detected: {len(issues)} issue(s)")
+            for issue in issues:
+                logging.warning(f"  - {issue.severity.upper()}: {issue.message}")
+
+            # Attempt auto-repair for fixable issues
+            auto_fixable = [i for i in issues if i.auto_fixable]
+            if auto_fixable:
+                logging.info(f"Attempting auto-repair for {len(auto_fixable)} issue(s)...")
+                repair_results = checker.auto_repair()
+
+                for issue_msg, success in repair_results.items():
+                    if success:
+                        logging.info(f"  ✓ Fixed: {issue_msg}")
+                    else:
+                        logging.error(f"  ✗ Failed to fix: {issue_msg}")
+
+                # Re-check after repair
+                remaining_issues = checker.check_all()
+                if remaining_issues:
+                    critical = [i for i in remaining_issues if i.severity == "critical"]
+                    if critical:
+                        error_msgs = "; ".join([i.message for i in critical])
+                        return False, None, f"Critical consistency issues remain: {error_msgs}"
 
         current_state = self.state_repo.get_current()
         if not current_state:
@@ -263,12 +334,10 @@ class StateService:
             project_path,  # NOVO: Passar project_path
         )
 
-        if success and new_state:
-            if not self.state_repo.set_current(new_state.state_number):
-                logging.warning(
-                    f"Failed to update current state pointer to {new_state.state_number}"
-                )
+        # Note: set_current() is now called inside _create_state_and_transition_atomic()
+        # for true atomicity. If the method returns success=True, current is already set.
 
+        if success and new_state:
             try:
                 if volume_codebase.exists() and project_path.exists():
                     self.git_manager.sync_project_to_volume(

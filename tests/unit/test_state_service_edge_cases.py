@@ -173,6 +173,7 @@ class TestStateServiceTransitionEdgeCases:
         mock_git_manager = Mock()
         mock_settings = Mock()
         mock_settings.docker_volume_name = "/tmp/volume"
+        mock_settings.sqlite_path = "/tmp/test.db"
 
         mock_state_repo.get_current.return_value = None
 
@@ -202,6 +203,7 @@ class TestStateServiceTransitionEdgeCases:
         mock_git_manager = Mock()
         mock_settings = Mock()
         mock_settings.docker_volume_name = "/tmp/volume"
+        mock_settings.sqlite_path = "/tmp/test.db"
 
         mock_current_state = Mock()
         mock_current_state.state_number = 0

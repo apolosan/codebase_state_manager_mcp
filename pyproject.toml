@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "codebase-state-manager-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "MCP Server for managing codebase states with Git, Neo4j, and Docker"
 authors = ["Developer <dev@example.com>"]
 packages = [{include = "mcp_server", from = "src"}]
@@ -27,7 +27,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "codebase-state-manager-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "MCP Server for managing codebase states with Git, Neo4j, and Docker"
 requires-python = ">=3.10"
 dependencies = [

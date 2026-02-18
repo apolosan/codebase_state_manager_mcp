@@ -4,8 +4,8 @@ import logging
 from pathlib import Path
 from typing import Optional, cast
 
-from src.mcp_server.models.state_model import BranchState
-from src.mcp_server.utils.branch_utils import sanitize_branch_name
+from ..models.state_model import BranchState
+from ..utils.branch_utils import sanitize_branch_name
 
 logger = logging.getLogger(__name__)
 

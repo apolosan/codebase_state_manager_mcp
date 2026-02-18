@@ -6,7 +6,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-90%25-green.svg)]()
 [![mypy](https://img.shields.io/badge/mypy-passing-green.svg)]()
 [![Bandit](https://img.shields.io/badge/bandit-clean-green.svg)]()
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)]()
 [![Status: WIP](https://img.shields.io/badge/status-WIP-yellow.svg)]()
 
 A sophisticated Model Context Protocol (MCP) server for managing codebase states with version control, graph database tracking, and containerized execution environments.
