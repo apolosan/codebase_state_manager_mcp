@@ -22,6 +22,11 @@ from .services.git_manager import GitManager
 from .services.state_service import StateService
 from .tools import (
     arbitrary_state_transition,
+    fix_volume_path,
+    get_genesis_result,
+    get_genesis_status,
+    get_fix_volume_path_result,
+    get_fix_volume_path_status,
     genesis,
     get_current_state_info,
     get_current_state_number,
@@ -30,6 +35,8 @@ from .tools import (
     get_transition_info,
     new_state_transition,
     search_states,
+    start_genesis,
+    start_fix_volume_path,
     total_states,
     track_transitions,
 )
@@ -103,9 +110,72 @@ async def genesis_tool() -> dict:
 
 
 @app.tool()
+async def start_genesis_tool() -> dict:
+    """Start an idempotent background genesis for the current project."""
+    project_path = str(Path.cwd())
+    volume_path = settings.volume_path
+    result = start_genesis(
+        state_service=state_service,
+        project_path=project_path,
+        volume_path=volume_path,
+    )
+    return result
+
+
+@app.tool()
+async def get_genesis_status_tool(job_id: str) -> dict:
+    """Get status for a background genesis job."""
+    result = get_genesis_status(job_id=job_id)
+    return result
+
+
+@app.tool()
+async def get_genesis_result_tool(job_id: str) -> dict:
+    """Get result for a background genesis job."""
+    result = get_genesis_result(job_id=job_id)
+    return result
+
+
+@app.tool()
 async def get_current_state_number_tool() -> dict:
     """Get the current state number."""
     result = get_current_state_number(state_service=state_service)
+    return result
+
+
+@app.tool()
+async def fix_volume_path_tool() -> dict:
+    """Rebuild only the configured VOLUME_PATH from the current project."""
+    project_path = str(Path.cwd())
+    result = fix_volume_path(
+        state_service=state_service,
+        project_path=project_path,
+    )
+    return result
+
+
+@app.tool()
+async def start_fix_volume_path_tool() -> dict:
+    """Start an idempotent background rebuild of the configured VOLUME_PATH."""
+    project_path = str(Path.cwd())
+    result = start_fix_volume_path(
+        state_service=state_service,
+        project_path=project_path,
+    )
+    return result
+
+
+@app.tool()
+async def get_fix_volume_path_status_tool(job_id: str) -> dict:
+    """Get status for a background VOLUME_PATH rebuild job."""
+    result = get_fix_volume_path_status(job_id=job_id)
+    return result
+
+
+@app.tool()
+async def get_fix_volume_path_result_tool(job_id: str) -> dict:
+    """Get result for a background VOLUME_PATH rebuild job."""
+    result = get_fix_volume_path_result(job_id=job_id)
     return result
 
 
@@ -350,6 +420,13 @@ logger.info(
 # List the tool functions we've registered
 registered_tool_names = [
     "genesis_tool",
+    "start_genesis_tool",
+    "get_genesis_status_tool",
+    "get_genesis_result_tool",
+    "fix_volume_path_tool",
+    "start_fix_volume_path_tool",
+    "get_fix_volume_path_status_tool",
+    "get_fix_volume_path_result_tool",
     "get_current_state_number_tool",
     "total_states_tool",
     "new_state_transition_tool",

@@ -367,3 +367,156 @@ class TestStateServiceGetters:
 
         assert state is None
         assert "not found" in message
+
+
+class TestStateServiceFixVolumePath:
+    @pytest.fixture
+    def mock_repos(self):
+        return MockStateRepository(), MockTransitionRepository()
+
+    @pytest.fixture
+    def git_manager(self):
+        manager = MagicMock()
+        manager.clone_to_volume.return_value = True
+        manager.get_directory_hashes.return_value = {"tracked.txt": "abc123"}
+        return manager
+
+    @pytest.fixture
+    def settings(self, tmp_path):
+        volume_path = tmp_path / "volume"
+        return Settings(
+            db_mode="sqlite",
+            sqlite_path=str(tmp_path / "test.db"),
+            docker_volume_name=str(volume_path),
+            volume_path=str(volume_path),
+        )
+
+    @pytest.fixture
+    def state_service(self, mock_repos, git_manager, settings):
+        state_repo, transition_repo = mock_repos
+        return StateService(
+            state_repo=state_repo,
+            transition_repo=transition_repo,
+            git_manager=git_manager,
+            settings=settings,
+        )
+
+    def test_fix_volume_path_rebuilds_missing_volume_without_touching_db(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        from src.mcp_server.models.state_model import State
+        from src.mcp_server.utils.init_manager import is_initialized
+
+        state_repo, _ = mock_repos
+        current_state = State(
+            state_number=0,
+            user_prompt="Genesis",
+            branch_name="main",
+            git_diff_info="initial",
+            hash="hash0",
+            file_hashes={"tracked.txt": "abc123"},
+        )
+        state_repo.create(current_state)
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
+        result_success, result_payload, result_message = state_service.fix_volume_path(
+            str(project_path)
+        )
+
+        assert result_success is True
+        assert result_payload == {
+            "volume_path": settings.docker_volume_name,
+            "codebase_path": str(Path(settings.docker_volume_name) / "codebase"),
+            "current_state": 0,
+        }
+        assert "reconstructed successfully" in result_message
+        assert Path(settings.docker_volume_name).exists()
+        assert is_initialized(settings.docker_volume_name) is True
+        git_manager.clone_to_volume.assert_called_once()
+        assert state_repo.count() == 1
+        assert state_repo.get_current().state_number == 0
+
+    def test_fix_volume_path_fails_when_current_state_missing(
+        self, state_service, git_manager, settings, tmp_path
+    ):
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+
+        result_success, result_payload, result_message = state_service.fix_volume_path(
+            str(project_path)
+        )
+
+        assert result_success is False
+        assert result_payload is None
+        assert "No current state found" in result_message
+        git_manager.clone_to_volume.assert_not_called()
+        assert Path(settings.docker_volume_name).exists() is False
+
+    def test_fix_volume_path_fails_when_clone_fails(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        from src.mcp_server.models.state_model import State
+        from src.mcp_server.utils.init_manager import is_initialized
+
+        git_manager.clone_to_volume.return_value = False
+
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "abc123"},
+            )
+        )
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+
+        result_success, result_payload, result_message = state_service.fix_volume_path(
+            str(project_path)
+        )
+
+        assert result_success is False
+        assert result_payload is None
+        assert "Failed to rebuild codebase snapshot" in result_message
+        assert is_initialized(settings.docker_volume_name) is False
+
+    def test_fix_volume_path_fails_when_rebuilt_snapshot_diverges_from_current_state(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        from src.mcp_server.models.state_model import State
+        from src.mcp_server.utils.init_manager import is_initialized
+
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "expected-hash"},
+            )
+        )
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
+        result_success, result_payload, result_message = state_service.fix_volume_path(
+            str(project_path)
+        )
+
+        assert result_success is False
+        assert result_payload is None
+        assert "does not match the current state stored in the database" in result_message
+        assert is_initialized(settings.docker_volume_name) is False

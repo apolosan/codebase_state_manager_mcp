@@ -1,10 +1,12 @@
 import logging
+import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
 from ..config import Settings
 from ..models.state_model import State, Transition
 from ..repositories.abstract_repositories import StateRepository, TransitionRepository
+from ..repositories.sqlite_repository import SQLiteStateRepository
 from ..services.branch_detection_service import BranchDetectionService
 from ..services.git_manager import GitManager, GitOperationError
 from ..utils.audit import get_audit_logger
@@ -52,6 +54,11 @@ class StateService:
         self.git_manager = git_manager
         self.settings = settings
         self._audit_logger = None
+        self._cached_full_hashes_state_number: Optional[int] = None
+        self._cached_full_hashes: Optional[Dict[str, str]] = None
+        self._ignore_manager = IgnoreManager()
+        self._project_path = Path.cwd()
+        self._initialized_cache: Optional[bool] = None
         self.branch_detector = BranchDetectionService(git_manager)
 
     @property
@@ -61,6 +68,54 @@ class StateService:
             self._audit_logger = get_audit_logger()
         return self._audit_logger
 
+    def _should_run_consistency_check(self) -> bool:
+        """Run expensive consistency checks only for the real SQLite-backed service."""
+        return isinstance(self.state_repo, SQLiteStateRepository)
+
+    def _is_initialized(self, volume_path: str) -> bool:
+        if self._initialized_cache is None:
+            self._initialized_cache = is_initialized(volume_path)
+        return self._initialized_cache
+
+    def _get_full_hashes_for_state(self, state_number: int) -> Dict[str, str]:
+        """Reconstruct full hashes with a rolling cache for sequential transitions."""
+        if state_number < 0:
+            return {}
+
+        genesis_state = self.state_repo.get_by_number(0)
+        if not genesis_state:
+            raise StateNotFoundError("Genesis state not found")
+
+        if state_number == 0:
+            genesis_hashes = dict(genesis_state.file_hashes or {})
+            self._cached_full_hashes_state_number = 0
+            self._cached_full_hashes = dict(genesis_hashes)
+            return genesis_hashes
+
+        if (
+            self._cached_full_hashes is not None
+            and self._cached_full_hashes_state_number is not None
+            and self._cached_full_hashes_state_number <= state_number
+        ):
+            current_hashes = dict(self._cached_full_hashes)
+            start_state = self._cached_full_hashes_state_number + 1
+        else:
+            current_hashes = dict(genesis_state.file_hashes or {})
+            start_state = 1
+
+        for current_state_number in range(start_state, state_number + 1):
+            state = self.state_repo.get_by_number(current_state_number)
+            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
+                for file_path, hash_val in state.file_hash_deltas.items():
+                    if hash_val is None:
+                        current_hashes.pop(file_path, None)
+                    else:
+                        current_hashes[file_path] = hash_val
+
+        self._cached_full_hashes_state_number = state_number
+        self._cached_full_hashes = dict(current_hashes)
+        return current_hashes
+
     def genesis(
         self,
         project_path: str,
@@ -68,7 +123,7 @@ class StateService:
         current_branch: Optional[str] = None,
         current_diff: Optional[str] = None,
     ) -> tuple[bool, Optional[State], str]:
-        if is_initialized(volume_path):
+        if self._is_initialized(volume_path):
             return False, None, "State manager already initialized. Call reset first."
 
         try:
@@ -97,7 +152,7 @@ class StateService:
             Path(volume_path).mkdir(parents=True, exist_ok=True)
 
             # Initialize ignore manager for intelligent filtering
-            ignore_manager = IgnoreManager()
+            ignore_manager = self._ignore_manager
 
             if self.git_manager.is_git_repo(source_path):
                 if not self.git_manager.clone_to_volume(source_path, target_path, ignore_manager):
@@ -150,6 +205,8 @@ class StateService:
             if not set_initialized(volume_path, True):
                 return False, None, "Failed to set initialized flag"
 
+            self._initialized_cache = True
+
             return True, state_0, "Genesis state created successfully"
         except GitOperationError as e:
             return False, None, f"Git operation error: {e}"
@@ -164,6 +221,7 @@ class StateService:
         file_hashes: Optional[dict],
         file_hash_deltas: dict,
         project_path: Path,
+        current_branch_name: Optional[str] = None,
     ) -> tuple[bool, Optional[State], str]:
         """Create a new state and transition atomically.
 
@@ -182,20 +240,22 @@ class StateService:
             return False, None, f"Invalid prompt: {e}"
 
         # CORREÇÃO CRÍTICA: Capturar branch atual do filesystem, não do estado anterior
-        current_branch_name = self.branch_detector.get_current_branch_name(project_path)
+        resolved_branch_name = current_branch_name or self.branch_detector.get_current_branch_name(
+            project_path
+        )
 
         # Log de mudança de branch (útil para debugging)
-        if current_branch_name != current_state.branch_name:
+        if resolved_branch_name != current_state.branch_name:
             logging.info(
                 f"Branch changed from '{current_state.branch_name}' to "
-                f"'{current_branch_name}' during state transition"
+                f"'{resolved_branch_name}' during state transition"
             )
 
         # Create new state with placeholder number (will be assigned by create_next)
         new_state = State(
             state_number=0,  # Placeholder, will be replaced by create_next
             user_prompt=sanitized_prompt,
-            branch_name=current_branch_name,  # ← CORRIGIDO!
+            branch_name=resolved_branch_name,
             git_diff_info=diff_info,
             hash="",  # Will be generated by create_next
             file_hashes=file_hashes,
@@ -247,51 +307,59 @@ class StateService:
             return False, None, f"Atomic operation failed: {e}"
 
     def new_state_transition(self, user_prompt: str) -> tuple[bool, Optional[State], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return False, None, "State manager not initialized. Call genesis first."
 
-        # Run consistency check before attempting transition
-        checker = ConsistencyChecker(
-            state_repo=self.state_repo,
-            volume_path=self.settings.docker_volume_name,
-            db_path=self.settings.sqlite_path,
-        )
-        issues = checker.check_all()
+        if self._should_run_consistency_check():
+            checker = ConsistencyChecker(
+                state_repo=self.state_repo,
+                volume_path=self.settings.docker_volume_name,
+                db_path=self.settings.sqlite_path,
+            )
+            issues = checker.check_all()
 
-        if issues:
-            logging.warning(f"Consistency issues detected: {len(issues)} issue(s)")
-            for issue in issues:
-                logging.warning(f"  - {issue.severity.upper()}: {issue.message}")
+            if issues:
+                logging.warning(f"Consistency issues detected: {len(issues)} issue(s)")
+                for issue in issues:
+                    logging.warning(f"  - {issue.severity.upper()}: {issue.message}")
 
-            # Attempt auto-repair for fixable issues
-            auto_fixable = [i for i in issues if i.auto_fixable]
-            if auto_fixable:
-                logging.info(f"Attempting auto-repair for {len(auto_fixable)} issue(s)...")
-                repair_results = checker.auto_repair()
+                auto_fixable = [i for i in issues if i.auto_fixable]
+                if auto_fixable:
+                    logging.info(f"Attempting auto-repair for {len(auto_fixable)} issue(s)...")
+                    repair_results = checker.auto_repair()
 
-                for issue_msg, success in repair_results.items():
-                    if success:
-                        logging.info(f"  ✓ Fixed: {issue_msg}")
-                    else:
-                        logging.error(f"  ✗ Failed to fix: {issue_msg}")
+                    for issue_msg, success in repair_results.items():
+                        if success:
+                            logging.info(f"  ✓ Fixed: {issue_msg}")
+                        else:
+                            logging.error(f"  ✗ Failed to fix: {issue_msg}")
 
-                # Re-check after repair
-                remaining_issues = checker.check_all()
-                if remaining_issues:
-                    critical = [i for i in remaining_issues if i.severity == "critical"]
-                    if critical:
-                        error_msgs = "; ".join([i.message for i in critical])
-                        return False, None, f"Critical consistency issues remain: {error_msgs}"
+                    remaining_issues = checker.check_all()
+                    if remaining_issues:
+                        critical = [i for i in remaining_issues if i.severity == "critical"]
+                        if critical:
+                            error_msgs = "; ".join([i.message for i in critical])
+                            return False, None, f"Critical consistency issues remain: {error_msgs}"
 
         current_state = self.state_repo.get_current()
         if not current_state:
             return False, None, "No current state found. Call genesis first."
 
-        volume_codebase = Path(self.settings.docker_volume_name) / "codebase"
-        project_path = Path.cwd()
+        project_path = self._project_path
 
         # Create ignore manager to respect .gitignore patterns
-        ignore_manager = IgnoreManager()
+        ignore_manager = self._ignore_manager
+
+        volume_codebase_path: Optional[Path] = None
+        if self._should_run_consistency_check():
+            candidate_volume_codebase = Path(self.settings.docker_volume_name) / "codebase"
+            if candidate_volume_codebase.exists():
+                volume_codebase_path = candidate_volume_codebase
+
+        if self._should_run_consistency_check():
+            current_branch_name = self.branch_detector.get_current_branch_name(project_path)
+        else:
+            current_branch_name = current_state.branch_name
 
         # Reconstruct complete file hashes for the PREVIOUS state
         # This ensures proper tracking based on actual content changes between states
@@ -299,29 +367,19 @@ class StateService:
             last_hashes = self._get_previous_state_full_hashes(current_state)
         except StateNotFoundError as e:
             # Fallback: if genesis state missing, try to get from volume
-            if volume_codebase.exists():
+            if volume_codebase_path is not None:
                 last_hashes = self.git_manager.get_directory_hashes(
-                    volume_codebase, ignore_manager=ignore_manager
+                    volume_codebase_path, ignore_manager=ignore_manager
                 )
             else:
                 last_hashes = {}
         diff_info, delta_hashes = self.git_manager.compute_changes_since_last_state(
             project_path=project_path,
             last_state_file_hashes=last_hashes,
-            volume_codebase_path=volume_codebase if volume_codebase.exists() else None,
+            volume_codebase_path=volume_codebase_path,
             is_genesis=False,  # Transitions are not genesis
             ignore_manager=ignore_manager,
         )
-
-        # CORREÇÃO: Detectar mudança de branch/git antes de criar estado
-        current_git_status = self.branch_detector.get_current_branch_name(project_path)
-
-        # Log de transição (útil para debug)
-        if current_git_status != current_state.branch_name:
-            logging.info(
-                f"Environment changed: branch '{current_state.branch_name}' → "
-                f"'{current_git_status}'"
-            )
 
         # For delta storage optimization: store only deltas for transition states
         # Don't reconstruct full hashes here - store deltas only
@@ -332,6 +390,7 @@ class StateService:
             None,  # No full hashes for transition states (save space)
             delta_hashes,  # Store actual deltas for optimization
             project_path,  # NOVO: Passar project_path
+            current_branch_name=current_branch_name,
         )
 
         # Note: set_current() is now called inside _create_state_and_transition_atomic()
@@ -339,10 +398,10 @@ class StateService:
 
         if success and new_state:
             try:
-                if volume_codebase.exists() and project_path.exists():
+                if volume_codebase_path is not None:
                     self.git_manager.sync_project_to_volume(
                         source_path=project_path,
-                        volume_path=volume_codebase,
+                        volume_path=volume_codebase_path,
                         sync_git=True,
                     )
             except (GitOperationError, OSError) as e:
@@ -414,8 +473,60 @@ class StateService:
 
         return True, target_state, f"Arbitrary transition to state {next_state} successful"
 
+    def fix_volume_path(self, project_path: Optional[str] = None) -> tuple[bool, Optional[dict], str]:
+        """Rebuild the configured volume snapshot without modifying the database."""
+        current_state = self.state_repo.get_current()
+        if not current_state:
+            return False, None, "No current state found. Cannot rebuild volume path without DB context."
+
+        source_path = Path(project_path) if project_path else self._project_path
+        if not source_path.exists() or not source_path.is_dir():
+            return False, None, f"Project path does not exist or is not a directory: {source_path}"
+
+        volume_root = Path(self.settings.docker_volume_name)
+        codebase_path = volume_root / "codebase"
+        ignore_manager = self._ignore_manager
+
+        try:
+            volume_root.mkdir(parents=True, exist_ok=True)
+
+            if not self.git_manager.clone_to_volume(source_path, codebase_path, ignore_manager):
+                return False, None, "Failed to rebuild codebase snapshot in volume"
+
+            rebuilt_hashes = self.git_manager.get_directory_hashes(
+                codebase_path, ignore_manager=ignore_manager
+            )
+            expected_hashes = self._get_current_full_hashes(current_state)
+            if rebuilt_hashes != expected_hashes:
+                shutil.rmtree(codebase_path, ignore_errors=True)
+                return (
+                    False,
+                    None,
+                    "Rebuilt volume snapshot does not match the current state stored in the database",
+                )
+
+            if not set_initialized(str(volume_root), True):
+                shutil.rmtree(codebase_path, ignore_errors=True)
+                return False, None, "Failed to restore initialized flag for rebuilt volume"
+
+            self._initialized_cache = True
+
+            return (
+                True,
+                {
+                    "volume_path": str(volume_root),
+                    "codebase_path": str(codebase_path),
+                    "current_state": current_state.state_number,
+                },
+                "Volume path reconstructed successfully",
+            )
+        except StateNotFoundError:
+            return False, None, "Genesis state not found. Cannot validate rebuilt volume."
+        except (GitOperationError, OSError, ValueError) as e:
+            return False, None, f"Failed to rebuild volume path: {e}"
+
     def get_current_state(self) -> tuple[Optional[State], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return None, "State manager not initialized. Call genesis first."
         state = self.state_repo.get_current()
         if state:
@@ -423,7 +534,7 @@ class StateService:
         return None, "No state found"
 
     def get_current_state_number(self) -> tuple[Optional[int], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return None, "State manager not initialized. Call genesis first."
         state = self.state_repo.get_current()
         if state:
@@ -431,7 +542,7 @@ class StateService:
         return None, "No state found"
 
     def get_state_info(self, state_number: int) -> tuple[Optional[State], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return None, "State manager not initialized. Call genesis first."
         state = self.state_repo.get_by_number(state_number)
         if state:
@@ -439,18 +550,18 @@ class StateService:
         return None, f"State {state_number} not found"
 
     def total_states(self) -> tuple[int, str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return 0, "State manager not initialized. Call genesis first."
         return self.state_repo.count(), "Total states count retrieved"
 
     def search_states(self, text: str) -> tuple[list[int], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return [], "State manager not initialized. Call genesis first."
         results = self.state_repo.search(text)
         return results, f"Found {len(results)} states matching '{text}'"
 
     def get_state_transitions(self, state_number: int) -> tuple[list, str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return [], "State manager not initialized. Call genesis first."
         transitions = self.transition_repo.get_by_state(state_number)
         result = []
@@ -469,7 +580,7 @@ class StateService:
         return result, f"Transitions for state {state_number} retrieved: {len(result)} total"
 
     def get_transition_info(self, transition_id: str) -> tuple[Optional[dict], str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return None, "State manager not initialized. Call genesis first."
         try:
             transition_id_int = int(transition_id)
@@ -484,24 +595,7 @@ class StateService:
         self, from_state: int, deltas: Dict[str, Optional[str]]
     ) -> Dict[str, str]:
         """Reconstruct full file hashes from genesis state by applying deltas sequentially."""
-        # Start with genesis state hashes
-        genesis_state = self.state_repo.get_by_number(0)
-        if not genesis_state:
-            raise StateNotFoundError("Genesis state not found")
-
-        current_hashes = dict(genesis_state.file_hashes or {})
-
-        # Apply deltas from state 1 up to from_state
-        for state_num in range(1, from_state + 1):
-            state = self.state_repo.get_by_number(state_num)
-            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
-                # Apply deltas: update/add files, remove deleted ones
-                for file_path, hash_val in state.file_hash_deltas.items():
-                    if hash_val is None:
-                        current_hashes.pop(file_path, None)
-                    else:
-                        current_hashes[file_path] = hash_val
-
+        current_hashes = self._get_full_hashes_for_state(from_state)
         return current_hashes
 
     def _get_current_full_hashes(self, current_state: State) -> Dict[str, str]:
@@ -510,25 +604,7 @@ class StateService:
         if current_state.state_number == 0 and current_state.file_hashes:
             return dict(current_state.file_hashes)
 
-        # For transition states, reconstruct from genesis by applying all deltas up to current state
-        genesis_state = self.state_repo.get_by_number(0)
-        if not genesis_state:
-            raise StateNotFoundError("Genesis state not found")
-
-        current_hashes = dict(genesis_state.file_hashes or {})
-
-        # Apply deltas from state 1 up to current state
-        for state_num in range(1, current_state.state_number + 1):
-            state = self.state_repo.get_by_number(state_num)
-            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
-                # Apply deltas: update/add files, remove deleted ones
-                for file_path, hash_val in state.file_hash_deltas.items():
-                    if hash_val is None:
-                        current_hashes.pop(file_path, None)
-                    else:
-                        current_hashes[file_path] = hash_val
-
-        return current_hashes
+        return self._get_full_hashes_for_state(current_state.state_number)
 
     def _get_previous_state_full_hashes(self, current_state: State) -> Dict[str, str]:
         """Get complete file hashes for the state BEFORE the current state.
@@ -558,29 +634,10 @@ class StateService:
         if current_state.state_number == 0:
             return {}
 
-        # Reconstruct hashes up to the state BEFORE current state
-        genesis_state = self.state_repo.get_by_number(0)
-        if not genesis_state:
-            raise StateNotFoundError("Genesis state not found")
-
-        previous_hashes = dict(genesis_state.file_hashes or {})
-
-        # Apply deltas from state 1 up to (current_state.state_number - 1)
-        # This builds the complete file hash state for the previous state
-        for state_num in range(1, current_state.state_number):
-            state = self.state_repo.get_by_number(state_num)
-            if state and hasattr(state, "file_hash_deltas") and state.file_hash_deltas:
-                # Apply deltas: update/add files, remove deleted ones
-                for file_path, hash_val in state.file_hash_deltas.items():
-                    if hash_val is None:
-                        previous_hashes.pop(file_path, None)
-                    else:
-                        previous_hashes[file_path] = hash_val
-
-        return previous_hashes
+        return self._get_full_hashes_for_state(current_state.state_number - 1)
 
     def track_transitions(self) -> tuple[list, str]:
-        if not is_initialized(self.settings.docker_volume_name):
+        if not self._is_initialized(self.settings.docker_volume_name):
             return [], "State manager not initialized. Call genesis first."
         transitions = self.transition_repo.get_last(5)
         return [str(t.transition_id) for t in transitions], "Last 5 transitions retrieved"

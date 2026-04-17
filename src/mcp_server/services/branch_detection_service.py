@@ -52,7 +52,8 @@ class BranchDetectionService:
             - "detached_head" if detached but hash unavailable
         """
         # Check if this is a git repository
-        if not self.git_manager.is_git_repo(project_path):
+        is_git_repo = self.git_manager.is_git_repo(project_path)
+        if is_git_repo is not True:
             return cast(str, BranchState.NOT_VERSIONED.value)
 
         try:

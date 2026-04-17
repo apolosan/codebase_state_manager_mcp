@@ -8,11 +8,13 @@ import time
 from typing import Any
 
 from ..services.state_service import StateService
+from .volume_fix_jobs import VolumeFixJobManager
 from ..utils.audit import AuditEventType, AuditOutcome, get_audit_logger
 from ..utils.logging import get_logger
 from ..utils.security import RateLimitExceeded, get_rate_limiter
 
 logger = get_logger(__name__)
+_volume_operation_jobs = VolumeFixJobManager()
 
 
 def _handle_rate_limit(client_id: str, endpoint: str) -> dict:
@@ -103,6 +105,101 @@ def genesis(
         )
         logger.error(f"Genesis failed: {e}", extra={"operation": "genesis", "client_id": client_id})
         raise
+
+
+def start_genesis(
+    state_service: StateService,
+    project_path: str,
+    volume_path: str,
+    client_id: str = "default",
+) -> dict:
+    """Start an idempotent background genesis job."""
+    rate_result = _handle_rate_limit(client_id, "start_genesis")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.start_genesis(state_service, project_path, volume_path)
+    return {"success": True, "job": job}
+
+
+def get_genesis_status(job_id: str, client_id: str = "default") -> dict:
+    """Get the status for a background genesis job."""
+    rate_result = _handle_rate_limit(client_id, "get_genesis_status")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.get_status(job_id)
+    if job is None:
+        return {"success": False, "message": f"Genesis job not found: {job_id}"}
+    return {"success": True, "job": job}
+
+
+def get_genesis_result(job_id: str, client_id: str = "default") -> dict:
+    """Get the stable result for a background genesis job."""
+    rate_result = _handle_rate_limit(client_id, "get_genesis_result")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.get_result(job_id)
+    if job is None:
+        return {"success": False, "message": f"Genesis job not found: {job_id}"}
+    return {"success": True, "job": job}
+
+
+def fix_volume_path(
+    state_service: StateService,
+    project_path: str,
+    client_id: str = "default",
+) -> dict:
+    """Rebuild only the configured volume path from the current project."""
+    rate_result = _handle_rate_limit(client_id, "fix_volume_path")
+    if rate_result:
+        return rate_result
+
+    success, volume, message = state_service.fix_volume_path(project_path)
+    return {
+        "success": success,
+        "volume": volume,
+        "message": message,
+    }
+
+
+def start_fix_volume_path(
+    state_service: StateService,
+    project_path: str,
+    client_id: str = "default",
+) -> dict:
+    """Start an idempotent background job to rebuild VOLUME_PATH."""
+    rate_result = _handle_rate_limit(client_id, "start_fix_volume_path")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.start(state_service, project_path)
+    return {"success": True, "job": job}
+
+
+def get_fix_volume_path_status(job_id: str, client_id: str = "default") -> dict:
+    """Get the status for a background VOLUME_PATH repair job."""
+    rate_result = _handle_rate_limit(client_id, "get_fix_volume_path_status")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.get_status(job_id)
+    if job is None:
+        return {"success": False, "message": f"Volume path repair job not found: {job_id}"}
+    return {"success": True, "job": job}
+
+
+def get_fix_volume_path_result(job_id: str, client_id: str = "default") -> dict:
+    """Get the stable result for a background VOLUME_PATH repair job."""
+    rate_result = _handle_rate_limit(client_id, "get_fix_volume_path_result")
+    if rate_result:
+        return rate_result
+
+    job = _volume_operation_jobs.get_result(job_id)
+    if job is None:
+        return {"success": False, "message": f"Volume path repair job not found: {job_id}"}
+    return {"success": True, "job": job}
 
 
 def new_state_transition(

@@ -15,10 +15,13 @@ class MockStateRepository:
     def __init__(self):
         self.states = {}
         self._current = None
+        self._max_state_number = -1
 
     def create(self, state: State) -> bool:
         self.states[state.state_number] = state
         self._current = state
+        if state.state_number > self._max_state_number:
+            self._max_state_number = state.state_number
         return True
 
     def get_by_number(self, state_number: int):
@@ -51,14 +54,13 @@ class MockStateRepository:
         return False
 
     def create_next(self, state: State) -> bool:
-        # Find next sequential number
-        max_num = max(self.states.keys()) if self.states else -1
-        next_num = max_num + 1
+        next_num = self._max_state_number + 1
         state.state_number = next_num
         # Generate a simple hash for testing
         state.hash = f"hash{next_num}"
         self.states[next_num] = state
         self._current = state
+        self._max_state_number = next_num
         return True
 
     def set_current(self, state_number: int) -> bool:
@@ -71,17 +73,19 @@ class MockStateRepository:
 class MockTransitionRepository:
     def __init__(self):
         self.transitions = {}
+        self._max_transition_id = 0
 
     def create(self, transition: Transition) -> bool:
         self.transitions[str(transition.transition_id)] = transition
+        if isinstance(transition.transition_id, int) and transition.transition_id > self._max_transition_id:
+            self._max_transition_id = transition.transition_id
         return True
 
     def create_next(self, transition: Transition) -> bool:
-        # Find next sequential ID
-        max_id = max([int(k) for k in self.transitions.keys()]) if self.transitions else 0
-        next_id = max_id + 1
+        next_id = self._max_transition_id + 1
         transition.transition_id = next_id
         self.transitions[str(next_id)] = transition
+        self._max_transition_id = next_id
         return True
 
     def get_by_id(self, transition_id):

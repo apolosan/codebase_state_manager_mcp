@@ -1,5 +1,10 @@
 from .mcp_tools import (
     arbitrary_state_transition,
+    fix_volume_path,
+    get_genesis_result,
+    get_genesis_status,
+    get_fix_volume_path_result,
+    get_fix_volume_path_status,
     genesis,
     get_current_state_info,
     get_current_state_number,
@@ -8,12 +13,21 @@ from .mcp_tools import (
     get_transition_info,
     new_state_transition,
     search_states,
+    start_genesis,
+    start_fix_volume_path,
     total_states,
     track_transitions,
 )
 
 __all__ = [
     "genesis",
+    "start_genesis",
+    "get_genesis_status",
+    "get_genesis_result",
+    "fix_volume_path",
+    "start_fix_volume_path",
+    "get_fix_volume_path_status",
+    "get_fix_volume_path_result",
     "new_state_transition",
     "arbitrary_state_transition",
     "get_current_state_number",

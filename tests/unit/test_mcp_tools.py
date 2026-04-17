@@ -10,6 +10,11 @@ from src.mcp_server.models.state_model import State, Transition
 from src.mcp_server.tools.mcp_tools import (
     _handle_rate_limit,
     arbitrary_state_transition,
+    fix_volume_path,
+    get_genesis_result,
+    get_genesis_status,
+    get_fix_volume_path_result,
+    get_fix_volume_path_status,
     genesis,
     get_current_state_info,
     get_current_state_number,
@@ -18,6 +23,8 @@ from src.mcp_server.tools.mcp_tools import (
     get_transition_info,
     new_state_transition,
     search_states,
+    start_genesis,
+    start_fix_volume_path,
     total_states,
     track_transitions,
 )
@@ -100,6 +107,322 @@ class TestGenesis:
 
             assert result["success"] is False
             mock_state_service.genesis.assert_not_called()
+
+
+class TestAsyncGenesis:
+    def test_start_genesis_returns_job_metadata(self):
+        mock_state_service = Mock()
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.start_genesis.return_value = {
+                    "job_id": "job-genesis-123",
+                    "status": "running",
+                    "message": "Genesis started",
+                    "idempotency_key": "key-genesis",
+                    "already_running": False,
+                }
+
+                result = start_genesis(
+                    state_service=mock_state_service,
+                    project_path="/tmp/project",
+                    volume_path="/tmp/volume",
+                    client_id="client1",
+                )
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-genesis-123",
+                        "status": "running",
+                        "message": "Genesis started",
+                        "idempotency_key": "key-genesis",
+                        "already_running": False,
+                    },
+                }
+                mock_jobs.start_genesis.assert_called_once_with(
+                    mock_state_service,
+                    "/tmp/project",
+                    "/tmp/volume",
+                )
+
+    def test_start_genesis_is_idempotent(self):
+        mock_state_service = Mock()
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.start_genesis.return_value = {
+                    "job_id": "job-genesis-123",
+                    "status": "completed",
+                    "message": "Reusing completed genesis job",
+                    "idempotency_key": "key-genesis",
+                    "already_running": False,
+                }
+
+                result = start_genesis(
+                    state_service=mock_state_service,
+                    project_path="/tmp/project",
+                    volume_path="/tmp/volume",
+                    client_id="client1",
+                )
+
+                assert result["success"] is True
+                assert result["job"]["job_id"] == "job-genesis-123"
+
+    def test_get_genesis_status_returns_current_job_state(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_status.return_value = {
+                    "job_id": "job-genesis-123",
+                    "status": "completed",
+                    "message": "Genesis completed successfully",
+                    "idempotency_key": "key-genesis",
+                }
+
+                result = get_genesis_status(job_id="job-genesis-123", client_id="client1")
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-genesis-123",
+                        "status": "completed",
+                        "message": "Genesis completed successfully",
+                        "idempotency_key": "key-genesis",
+                    },
+                }
+
+    def test_get_genesis_result_returns_stable_completed_result(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_result.return_value = {
+                    "job_id": "job-genesis-123",
+                    "status": "completed",
+                    "result": {
+                        "success": True,
+                        "state": {"state_number": 0},
+                        "message": "Genesis state created successfully",
+                    },
+                }
+
+                result = get_genesis_result(job_id="job-genesis-123", client_id="client1")
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-genesis-123",
+                        "status": "completed",
+                        "result": {
+                            "success": True,
+                            "state": {"state_number": 0},
+                            "message": "Genesis state created successfully",
+                        },
+                    },
+                }
+
+    def test_get_genesis_result_returns_not_found(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_result.return_value = None
+
+                result = get_genesis_result(job_id="missing-genesis", client_id="client1")
+
+                assert result == {
+                    "success": False,
+                    "message": "Genesis job not found: missing-genesis",
+                }
+
+
+class TestFixVolumePath:
+    """Tests for fix_volume_path function."""
+
+    def test_fix_volume_path_success(self):
+        """Test successful volume path reconstruction."""
+        mock_state_service = Mock()
+        mock_state_service.fix_volume_path.return_value = (
+            True,
+            {
+                "volume_path": "/tmp/volume",
+                "codebase_path": "/tmp/volume/codebase",
+                "current_state": 3,
+            },
+            "Volume path reconstructed successfully",
+        )
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {}
+
+            result = fix_volume_path(
+                state_service=mock_state_service,
+                project_path="/tmp/project",
+                client_id="client1",
+            )
+
+            assert result == {
+                "success": True,
+                "volume": {
+                    "volume_path": "/tmp/volume",
+                    "codebase_path": "/tmp/volume/codebase",
+                    "current_state": 3,
+                },
+                "message": "Volume path reconstructed successfully",
+            }
+            mock_state_service.fix_volume_path.assert_called_once_with("/tmp/project")
+
+    def test_fix_volume_path_rate_limited(self):
+        """Test fix_volume_path when rate limited."""
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {"success": False, "error": "rate_limit"}
+
+            mock_state_service = Mock()
+
+            result = fix_volume_path(
+                state_service=mock_state_service,
+                project_path="/tmp/project",
+                client_id="client1",
+            )
+
+            assert result["success"] is False
+            mock_state_service.fix_volume_path.assert_not_called()
+
+
+class TestAsyncFixVolumePath:
+    """Tests for async/idempotent fix_volume_path flow."""
+
+    def test_start_fix_volume_path_returns_job_metadata(self):
+        mock_state_service = Mock()
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.start.return_value = {
+                    "job_id": "job-123",
+                    "status": "running",
+                    "message": "Volume path repair started",
+                    "idempotency_key": "key-1",
+                    "already_running": False,
+                }
+
+                result = start_fix_volume_path(
+                    state_service=mock_state_service,
+                    project_path="/tmp/project",
+                    client_id="client1",
+                )
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-123",
+                        "status": "running",
+                        "message": "Volume path repair started",
+                        "idempotency_key": "key-1",
+                        "already_running": False,
+                    },
+                }
+                mock_jobs.start.assert_called_once_with(mock_state_service, "/tmp/project")
+
+    def test_start_fix_volume_path_is_idempotent(self):
+        mock_state_service = Mock()
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.start.return_value = {
+                    "job_id": "job-123",
+                    "status": "running",
+                    "message": "Reusing running volume path repair job",
+                    "idempotency_key": "key-1",
+                    "already_running": True,
+                }
+
+                result = start_fix_volume_path(
+                    state_service=mock_state_service,
+                    project_path="/tmp/project",
+                    client_id="client1",
+                )
+
+                assert result["success"] is True
+                assert result["job"]["already_running"] is True
+                assert result["job"]["job_id"] == "job-123"
+
+    def test_get_fix_volume_path_status_returns_current_job_state(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_status.return_value = {
+                    "job_id": "job-123",
+                    "status": "completed",
+                    "message": "Volume path reconstructed successfully",
+                    "idempotency_key": "key-1",
+                }
+
+                result = get_fix_volume_path_status(job_id="job-123", client_id="client1")
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-123",
+                        "status": "completed",
+                        "message": "Volume path reconstructed successfully",
+                        "idempotency_key": "key-1",
+                    },
+                }
+                mock_jobs.get_status.assert_called_once_with("job-123")
+
+    def test_get_fix_volume_path_result_returns_stable_completed_result(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_result.return_value = {
+                    "job_id": "job-123",
+                    "status": "completed",
+                    "result": {
+                        "success": True,
+                        "volume": {
+                            "volume_path": "/tmp/volume",
+                            "codebase_path": "/tmp/volume/codebase",
+                            "current_state": 3,
+                        },
+                        "message": "Volume path reconstructed successfully",
+                    },
+                }
+
+                result = get_fix_volume_path_result(job_id="job-123", client_id="client1")
+
+                assert result == {
+                    "success": True,
+                    "job": {
+                        "job_id": "job-123",
+                        "status": "completed",
+                        "result": {
+                            "success": True,
+                            "volume": {
+                                "volume_path": "/tmp/volume",
+                                "codebase_path": "/tmp/volume/codebase",
+                                "current_state": 3,
+                            },
+                            "message": "Volume path reconstructed successfully",
+                        },
+                    },
+                }
+                mock_jobs.get_result.assert_called_once_with("job-123")
+
+    def test_get_fix_volume_path_result_returns_not_found(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_result.return_value = None
+
+                result = get_fix_volume_path_result(job_id="missing-job", client_id="client1")
+
+                assert result == {
+                    "success": False,
+                    "message": "Volume path repair job not found: missing-job",
+                }
 
 
 class TestNewStateTransition:
