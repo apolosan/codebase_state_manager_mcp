@@ -7,7 +7,7 @@ import json
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class VolumeFixJobManager:
@@ -59,7 +59,9 @@ class VolumeFixJobManager:
             "message": message,
         }
 
-    def _run_genesis(self, state_service: Any, project_path: str, volume_path: str) -> dict[str, Any]:
+    def _run_genesis(
+        self, state_service: Any, project_path: str, volume_path: str
+    ) -> dict[str, Any]:
         success, state, message = state_service.genesis(project_path, volume_path)
         return {
             "success": success,

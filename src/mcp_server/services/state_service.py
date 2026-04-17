@@ -473,11 +473,17 @@ class StateService:
 
         return True, target_state, f"Arbitrary transition to state {next_state} successful"
 
-    def fix_volume_path(self, project_path: Optional[str] = None) -> tuple[bool, Optional[dict], str]:
+    def fix_volume_path(
+        self, project_path: Optional[str] = None
+    ) -> tuple[bool, Optional[dict], str]:
         """Rebuild the configured volume snapshot without modifying the database."""
         current_state = self.state_repo.get_current()
         if not current_state:
-            return False, None, "No current state found. Cannot rebuild volume path without DB context."
+            return (
+                False,
+                None,
+                "No current state found. Cannot rebuild volume path without DB context.",
+            )
 
         source_path = Path(project_path) if project_path else self._project_path
         if not source_path.exists() or not source_path.is_dir():

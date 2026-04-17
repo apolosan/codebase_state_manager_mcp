@@ -4,8 +4,10 @@ MCP Server for Codebase State Manager
 Integrates the codebase-state-manager-mcp library with MCP protocol
 """
 
+import logging
 import os
 import sys
+import traceback
 from pathlib import Path
 
 # Add src to path
@@ -16,27 +18,35 @@ from mcp.server.fastmcp import FastMCP
 from neo4j.exceptions import ServiceUnavailable, SessionExpired
 
 from .config import get_settings, reset_settings
-from .repositories.neo4j_repository import create_neo4j_repositories
-from .repositories.sqlite_repository import create_sqlite_repositories
+from .repositories.neo4j_repository import (
+    Neo4jStateRepository,
+    Neo4jTransitionRepository,
+    create_neo4j_repositories,
+)
+from .repositories.sqlite_repository import (
+    SQLiteStateRepository,
+    SQLiteTransitionRepository,
+    create_sqlite_repositories,
+)
 from .services.git_manager import GitManager
 from .services.state_service import StateService
 from .tools import (
     arbitrary_state_transition,
     fix_volume_path,
-    get_genesis_result,
-    get_genesis_status,
-    get_fix_volume_path_result,
-    get_fix_volume_path_status,
     genesis,
     get_current_state_info,
     get_current_state_number,
+    get_fix_volume_path_result,
+    get_fix_volume_path_status,
+    get_genesis_result,
+    get_genesis_status,
     get_state_info,
     get_state_transitions,
     get_transition_info,
     new_state_transition,
     search_states,
-    start_genesis,
     start_fix_volume_path,
+    start_genesis,
     total_states,
     track_transitions,
 )
@@ -45,9 +55,6 @@ settings = get_settings()
 
 # Ensure docker_volume_name matches volume_path for consistency
 settings.docker_volume_name = settings.volume_path
-
-from .repositories.neo4j_repository import Neo4jStateRepository, Neo4jTransitionRepository
-from .repositories.sqlite_repository import SQLiteStateRepository, SQLiteTransitionRepository
 
 state_repo: Neo4jStateRepository | SQLiteStateRepository
 transition_repo: Neo4jTransitionRepository | SQLiteTransitionRepository
@@ -408,9 +415,6 @@ async def repair_consistency_tool() -> dict:
         return {"success": False, "error": str(e), "summary": f"Failed to repair consistency: {e}"}
 
 
-# Debug: print registered tools
-import logging
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info(
@@ -439,10 +443,6 @@ logger.info(f"Manually registered tool functions: {registered_tool_names}")
 
 
 def main():
-    import logging
-    import sys
-    import traceback
-
     # Enable debug logging for MCP and anyio
     logging.basicConfig(
         level=logging.DEBUG,
