@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, Optional
@@ -42,6 +43,8 @@ class InvalidStateTransitionError(StateServiceError):
 
 
 class StateService:
+    MANAGED_PROJECT_PATH_METADATA_KEY = "managed_project_path"
+
     def __init__(
         self,
         state_repo: StateRepository,
@@ -76,6 +79,123 @@ class StateService:
         if self._initialized_cache is None:
             self._initialized_cache = is_initialized(volume_path)
         return self._initialized_cache
+
+    def _repair_consistency_for_volume_rebuild(self) -> tuple[bool, Optional[str]]:
+        """Repair non-volume consistency issues before rebuilding the snapshot."""
+        if not self._should_run_consistency_check():
+            return True, None
+
+        checker = ConsistencyChecker(
+            state_repo=self.state_repo,
+            volume_path=self.settings.docker_volume_name,
+            db_path=self.settings.sqlite_path,
+        )
+        issues = checker.check_all()
+
+        if any(issue.auto_fixable for issue in issues):
+            checker.auto_repair()
+            issues = checker.check_all()
+
+        blocking_issues = [
+            issue.message
+            for issue in issues
+            if issue.category != "volume" and issue.severity in {"critical", "error"}
+        ]
+        if blocking_issues:
+            return False, "; ".join(blocking_issues)
+
+        self._initialized_cache = is_initialized(self.settings.docker_volume_name)
+        return True, None
+
+    def _prepare_volume_root_for_rebuild(
+        self, volume_root: Path, codebase_path: Path
+    ) -> tuple[bool, Optional[str]]:
+        """Ensure the target volume root can receive a rebuilt snapshot."""
+        if volume_root.exists() and not volume_root.is_dir():
+            return False, f"Volume path exists but is not a directory: {volume_root}"
+
+        volume_root.mkdir(parents=True, exist_ok=True)
+
+        if codebase_path.exists() and not codebase_path.is_dir():
+            codebase_path.unlink()
+
+        return True, None
+
+    def _remember_project_path(self, project_path: Path) -> None:
+        """Persist the managed project path for later rebuild operations."""
+        self._project_path = project_path
+        try:
+            self.state_repo.set_metadata(
+                self.MANAGED_PROJECT_PATH_METADATA_KEY,
+                str(project_path),
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Failed to persist managed project path metadata",
+                exc_info=True,
+            )
+
+    def _iter_candidate_project_paths(self, provided_project_path: Optional[str]) -> list[Path]:
+        """Return candidate project roots ordered by trustworthiness."""
+        candidates: list[Path] = []
+
+        env_project_path = os.getenv("MANAGED_PROJECT_PATH")
+        persisted_project_path = None
+        try:
+            persisted_project_path = self.state_repo.get_metadata(self.MANAGED_PROJECT_PATH_METADATA_KEY)
+        except Exception:
+            persisted_project_path = None
+
+        for raw_path in [env_project_path, persisted_project_path, provided_project_path, str(self._project_path)]:
+            if not raw_path:
+                continue
+            candidate = Path(raw_path).expanduser().resolve()
+            if candidate.exists() and candidate.is_dir() and candidate not in candidates:
+                candidates.append(candidate)
+
+        return candidates
+
+    def _summarize_hash_mismatch(
+        self,
+        rebuilt_hashes: Dict[str, str],
+        expected_hashes: Dict[str, str],
+    ) -> str:
+        """Build a compact mismatch summary for diagnostics."""
+        rebuilt_paths = set(rebuilt_hashes)
+        expected_paths = set(expected_hashes)
+        missing = sorted(expected_paths - rebuilt_paths)
+        extra = sorted(rebuilt_paths - expected_paths)
+        changed = sorted(
+            path for path in rebuilt_paths & expected_paths if rebuilt_hashes[path] != expected_hashes[path]
+        )
+        details = [
+            f"missing={len(missing)}",
+            f"extra={len(extra)}",
+            f"changed={len(changed)}",
+        ]
+        samples = []
+        if missing:
+            samples.append(f"missing_sample={missing[:3]}")
+        if extra:
+            samples.append(f"extra_sample={extra[:3]}")
+        if changed:
+            samples.append(f"changed_sample={changed[:3]}")
+        return ", ".join(details + samples)
+
+    def _create_recovery_transition_for_project(
+        self,
+        project_path: Path,
+        current_state: State,
+    ) -> tuple[bool, Optional[State], str]:
+        """Create a technical transition so DB state matches the current project."""
+        original_project_path = self._project_path
+        try:
+            self._project_path = project_path
+            return self.new_state_transition(
+                "Automatic VOLUME_PATH recovery transition to current project snapshot"
+            )
+        finally:
+            self._project_path = original_project_path
 
     def _get_full_hashes_for_state(self, state_number: int) -> Dict[str, str]:
         """Reconstruct full hashes with a rolling cache for sequential transitions."""
@@ -128,6 +248,7 @@ class StateService:
 
         try:
             source_path = Path(project_path)
+            self._remember_project_path(source_path.resolve())
             target_path = Path(volume_path) / "codebase"
 
             # Validate that target_path is not inside source_path to prevent recursion
@@ -361,12 +482,12 @@ class StateService:
         else:
             current_branch_name = current_state.branch_name
 
-        # Reconstruct complete file hashes for the PREVIOUS state
-        # This ensures proper tracking based on actual content changes between states
+        # Reconstruct complete file hashes for the CURRENT state so the next transition
+        # stores only the delta between the real current snapshot and the project now.
         try:
-            last_hashes = self._get_previous_state_full_hashes(current_state)
+            last_hashes = self._get_current_full_hashes(current_state)
         except StateNotFoundError as e:
-            # Fallback: if genesis state missing, try to get from volume
+            # Fallback: if genesis reconstruction fails, try to get from volume
             if volume_codebase_path is not None:
                 last_hashes = self.git_manager.get_directory_hashes(
                     volume_codebase_path, ignore_manager=ignore_manager
@@ -476,7 +597,15 @@ class StateService:
     def fix_volume_path(
         self, project_path: Optional[str] = None
     ) -> tuple[bool, Optional[dict], str]:
-        """Rebuild the configured volume snapshot without modifying the database."""
+        """Repair the configured volume snapshot and finalize DB state when needed."""
+        consistency_ok, consistency_message = self._repair_consistency_for_volume_rebuild()
+        if not consistency_ok:
+            return (
+                False,
+                None,
+                f"Cannot rebuild volume path while consistency issues remain: {consistency_message}",
+            )
+
         current_state = self.state_repo.get_current()
         if not current_state:
             return (
@@ -485,18 +614,73 @@ class StateService:
                 "No current state found. Cannot rebuild volume path without DB context.",
             )
 
-        source_path = Path(project_path) if project_path else self._project_path
-        if not source_path.exists() or not source_path.is_dir():
-            return False, None, f"Project path does not exist or is not a directory: {source_path}"
-
         volume_root = Path(self.settings.docker_volume_name)
         codebase_path = volume_root / "codebase"
         ignore_manager = self._ignore_manager
+        candidate_paths = self._iter_candidate_project_paths(project_path)
+        if not candidate_paths:
+            return (
+                False,
+                None,
+                "No valid project path available for rebuild. Set MANAGED_PROJECT_PATH or run genesis from the managed codebase.",
+            )
 
         try:
-            volume_root.mkdir(parents=True, exist_ok=True)
+            prepared, prepare_message = self._prepare_volume_root_for_rebuild(
+                volume_root=volume_root,
+                codebase_path=codebase_path,
+            )
+            if not prepared:
+                return False, None, str(prepare_message)
+            recovery_transition_created = False
+            used_source_path: Optional[Path] = None
+            current_project_hashes: Optional[Dict[str, str]] = None
+            last_mismatch_summary: Optional[str] = None
 
-            if not self.git_manager.clone_to_volume(source_path, codebase_path, ignore_manager):
+            for candidate_path in candidate_paths:
+                used_source_path = candidate_path
+                current_project_hashes = self.git_manager.get_directory_hashes(
+                    candidate_path, ignore_manager=ignore_manager
+                )
+                expected_hashes = self._get_current_full_hashes(current_state)
+
+                if current_project_hashes == expected_hashes:
+                    self._remember_project_path(candidate_path)
+                    break
+
+                last_mismatch_summary = self._summarize_hash_mismatch(
+                    rebuilt_hashes=current_project_hashes,
+                    expected_hashes=expected_hashes,
+                )
+            else:
+                if used_source_path is None or current_project_hashes is None:
+                    return False, None, "Failed to inspect project snapshot for recovery"
+
+                created, created_state, creation_message = self._create_recovery_transition_for_project(
+                    project_path=used_source_path,
+                    current_state=current_state,
+                )
+                if not created or created_state is None:
+                    return (
+                        False,
+                        None,
+                        "Project snapshot diverges from the current state stored in the database"
+                        + (
+                            f" ({last_mismatch_summary})"
+                            if last_mismatch_summary
+                            else ""
+                        )
+                        + f"; failed to create recovery transition: {creation_message}",
+                    )
+
+                current_state = created_state
+                recovery_transition_created = True
+                self._remember_project_path(used_source_path)
+
+            if used_source_path is None:
+                return False, None, "No project path selected for recovery"
+
+            if not self.git_manager.clone_to_volume(used_source_path, codebase_path, ignore_manager):
                 return False, None, "Failed to rebuild codebase snapshot in volume"
 
             rebuilt_hashes = self.git_manager.get_directory_hashes(
@@ -504,11 +688,16 @@ class StateService:
             )
             expected_hashes = self._get_current_full_hashes(current_state)
             if rebuilt_hashes != expected_hashes:
+                mismatch_summary = self._summarize_hash_mismatch(
+                    rebuilt_hashes=rebuilt_hashes,
+                    expected_hashes=expected_hashes,
+                )
                 shutil.rmtree(codebase_path, ignore_errors=True)
                 return (
                     False,
                     None,
-                    "Rebuilt volume snapshot does not match the current state stored in the database",
+                    "Recovered state still does not match rebuilt volume snapshot"
+                    + (f" ({mismatch_summary})" if mismatch_summary else ""),
                 )
 
             if not set_initialized(str(volume_root), True):
@@ -517,14 +706,35 @@ class StateService:
 
             self._initialized_cache = True
 
+            if self._should_run_consistency_check():
+                checker = ConsistencyChecker(
+                    state_repo=self.state_repo,
+                    volume_path=self.settings.docker_volume_name,
+                    db_path=self.settings.sqlite_path,
+                )
+                remaining_issues = checker.check_all()
+                blocking_issues = [
+                    issue.message for issue in remaining_issues if issue.severity in {"critical", "error"}
+                ]
+                if blocking_issues:
+                    shutil.rmtree(codebase_path, ignore_errors=True)
+                    self._initialized_cache = False
+                    return (
+                        False,
+                        None,
+                        "Recovery transition completed but consistency issues remain: "
+                        + "; ".join(blocking_issues),
+                    )
+
             return (
                 True,
                 {
                     "volume_path": str(volume_root),
                     "codebase_path": str(codebase_path),
                     "current_state": current_state.state_number,
+                    "recovery_transition_created": recovery_transition_created,
                 },
-                "Volume path reconstructed successfully",
+                "Volume path recovered successfully",
             )
         except StateNotFoundError:
             return False, None, "Genesis state not found. Cannot validate rebuilt volume."
@@ -611,36 +821,6 @@ class StateService:
             return dict(current_state.file_hashes)
 
         return self._get_full_hashes_for_state(current_state.state_number)
-
-    def _get_previous_state_full_hashes(self, current_state: State) -> Dict[str, str]:
-        """Get complete file hashes for the state BEFORE the current state.
-
-        CRITICAL FIX FOR GIT_DIFF_INFO TRACKING:
-        This method resolves the issue where files appeared as 'added' in multiple states.
-
-        PROBLEM SOLVED:
-        - Previously: `last_hashes = getattr(current_state, "file_hashes", {})` returned empty for transition states
-        - Now: Reconstruct complete hashes by applying deltas from genesis up to the previous state
-        - Result: Files appear as 'added' only once, then as 'modified' when content changes
-
-        USAGE:
-        Used in new_state_transition() to get proper hash comparison baseline.
-        This ensures git_diff_info tracks actual content changes, not git repository status.
-
-        Args:
-            current_state: The current state from which we'll transition to the next state
-
-        Returns:
-            Complete file hashes for the state immediately before current_state
-
-        Raises:
-            StateNotFoundError: If genesis state cannot be found
-        """
-        # If current state is genesis, there's no previous state
-        if current_state.state_number == 0:
-            return {}
-
-        return self._get_full_hashes_for_state(current_state.state_number - 1)
 
     def track_transitions(self) -> tuple[list, str]:
         if not self._is_initialized(self.settings.docker_volume_name):

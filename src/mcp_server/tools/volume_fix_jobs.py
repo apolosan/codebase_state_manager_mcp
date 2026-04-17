@@ -77,17 +77,16 @@ class VolumeFixJobManager:
             if existing_job_id is not None:
                 existing_job = self._jobs[existing_job_id]
                 status = self._status_from_future(existing_job["future"])
-                return {
-                    "job_id": existing_job_id,
-                    "status": status,
-                    "message": (
-                        "Reusing running volume path repair job"
-                        if status in {"pending", "running"}
-                        else "Reusing completed volume path repair job"
-                    ),
-                    "idempotency_key": idempotency_key,
-                    "already_running": status in {"pending", "running"},
-                }
+                if status in {"pending", "running"}:
+                    return {
+                        "job_id": existing_job_id,
+                        "status": status,
+                        "message": "Reusing running volume path repair job",
+                        "idempotency_key": idempotency_key,
+                        "already_running": True,
+                    }
+
+                self._jobs_by_key.pop(idempotency_key, None)
 
             job_id = str(uuid.uuid4())
             future = self._submit(state_service, project_path)

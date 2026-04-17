@@ -15,6 +15,7 @@ class MockStateRepository:
         self.states = {}
         self._initialized = False
         self._current_state = None
+        self.metadata = {}
 
     def create(self, state: State) -> bool:
         self.states[state.state_number] = state
@@ -63,6 +64,13 @@ class MockStateRepository:
         if state_number not in self.states:
             return False
         self._current_state = state_number
+        return True
+
+    def get_metadata(self, key: str):
+        return self.metadata.get(key)
+
+    def set_metadata(self, key: str, value: str) -> bool:
+        self.metadata[key] = value
         return True
 
 
@@ -432,8 +440,9 @@ class TestStateServiceFixVolumePath:
             "volume_path": settings.docker_volume_name,
             "codebase_path": str(Path(settings.docker_volume_name) / "codebase"),
             "current_state": 0,
+            "recovery_transition_created": False,
         }
-        assert "reconstructed successfully" in result_message
+        assert "recovered successfully" in result_message
         assert Path(settings.docker_volume_name).exists()
         assert is_initialized(settings.docker_volume_name) is True
         git_manager.clone_to_volume.assert_called_once()
@@ -476,6 +485,13 @@ class TestStateServiceFixVolumePath:
             )
         )
         state_repo.set_current(0)
+        state_repo.set_metadata(
+            state_service.MANAGED_PROJECT_PATH_METADATA_KEY,
+            str(tmp_path / "managed-project"),
+        )
+
+        managed_project = tmp_path / "managed-project"
+        managed_project.mkdir()
 
         project_path = tmp_path / "project"
         project_path.mkdir()
@@ -512,11 +528,260 @@ class TestStateServiceFixVolumePath:
         project_path.mkdir()
         (project_path / "tracked.txt").write_text("content", encoding="utf-8")
 
+        with patch.object(
+            state_service,
+            "_create_recovery_transition_for_project",
+            return_value=(False, None, "alignment rejected"),
+        ):
+            result_success, result_payload, result_message = state_service.fix_volume_path(
+                str(project_path)
+            )
+
+        assert result_success is False
+        assert result_payload is None
+        assert "Project snapshot diverges from the current state stored in the database" in result_message
+        assert "failed to create recovery transition" in result_message
+        assert is_initialized(settings.docker_volume_name) is False
+
+    def test_fix_volume_path_runs_consistency_auto_repair_before_rebuild(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "abc123"},
+            )
+        )
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
+        fixable_issue = MagicMock(
+            auto_fixable=True,
+            category="filesystem",
+            severity="error",
+            message="flag missing",
+        )
+        checker = MagicMock()
+        checker.check_all.side_effect = [[fixable_issue], [], []]
+
+        with patch.object(state_service, "_should_run_consistency_check", return_value=True):
+            with patch("src.mcp_server.services.state_service.ConsistencyChecker", return_value=checker):
+                result_success, result_payload, result_message = state_service.fix_volume_path(
+                    str(project_path)
+                )
+
+        assert result_success is True
+        assert result_payload is not None
+        assert "recovered successfully" in result_message
+        assert result_payload["recovery_transition_created"] is False
+        checker.auto_repair.assert_called_once_with()
+        git_manager.clone_to_volume.assert_called_once()
+
+    def test_fix_volume_path_uses_reconstructed_hashes_for_transition_state(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "old-hash"},
+            )
+        )
+        state_repo.create(
+            State(
+                state_number=1,
+                user_prompt="Transition",
+                branch_name="main",
+                git_diff_info="diff",
+                hash="hash1",
+                file_hash_deltas={"tracked.txt": "abc123"},
+            )
+        )
+        state_repo.set_current(1)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
         result_success, result_payload, result_message = state_service.fix_volume_path(
             str(project_path)
         )
 
+        assert result_success is True
+        assert result_payload is not None
+        assert result_payload["current_state"] == 1
+        assert result_payload["recovery_transition_created"] is False
+        assert "recovered successfully" in result_message
+
+    def test_fix_volume_path_fails_when_non_volume_consistency_issue_remains(
+        self, state_service, mock_repos, git_manager, tmp_path
+    ):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "abc123"},
+            )
+        )
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+
+        blocking_issue = MagicMock(
+            auto_fixable=False,
+            category="db",
+            severity="error",
+            message="database is not accessible",
+        )
+        checker = MagicMock()
+        checker.check_all.return_value = [blocking_issue]
+
+        with patch.object(state_service, "_should_run_consistency_check", return_value=True):
+            with patch("src.mcp_server.services.state_service.ConsistencyChecker", return_value=checker):
+                result_success, result_payload, result_message = state_service.fix_volume_path(
+                    str(project_path)
+                )
+
         assert result_success is False
         assert result_payload is None
-        assert "does not match the current state stored in the database" in result_message
-        assert is_initialized(settings.docker_volume_name) is False
+        assert "consistency issues remain" in result_message
+        assert "database is not accessible" in result_message
+        git_manager.clone_to_volume.assert_not_called()
+
+    def test_fix_volume_path_uses_persisted_managed_project_path_before_provided_path(
+        self, state_service, mock_repos, git_manager, settings, tmp_path
+    ):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "abc123"},
+            )
+        )
+        state_repo.set_current(0)
+        state_repo.set_metadata(
+            state_service.MANAGED_PROJECT_PATH_METADATA_KEY,
+            str(tmp_path / "managed-project"),
+        )
+
+        managed_project = tmp_path / "managed-project"
+        managed_project.mkdir()
+        (managed_project / "tracked.txt").write_text("content", encoding="utf-8")
+
+        wrong_project = tmp_path / "wrong-project"
+        wrong_project.mkdir()
+        (wrong_project / "other.txt").write_text("wrong", encoding="utf-8")
+
+        result_success, result_payload, result_message = state_service.fix_volume_path(
+            str(wrong_project)
+        )
+
+        assert result_success is True
+        assert result_payload is not None
+        assert result_payload["recovery_transition_created"] is False
+        assert "recovered successfully" in result_message
+        clone_source = git_manager.clone_to_volume.call_args.args[0]
+        assert clone_source == managed_project.resolve()
+
+    def test_fix_volume_path_reports_mismatch_summary(self, state_service, mock_repos, git_manager, tmp_path):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "expected", "missing.txt": "missing"},
+            )
+        )
+        state_repo.set_current(0)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
+        git_manager.get_directory_hashes.return_value = {
+            "tracked.txt": "abc123",
+            "extra.txt": "extra",
+        }
+
+        with patch.object(
+            state_service,
+            "_create_recovery_transition_for_project",
+            return_value=(False, None, "alignment rejected"),
+        ):
+            result_success, result_payload, result_message = state_service.fix_volume_path(
+                str(project_path)
+            )
+
+        assert result_success is False
+        assert result_payload is None
+        assert "missing=1" in result_message
+        assert "extra=1" in result_message
+        assert "changed=1" in result_message
+
+    def test_fix_volume_path_auto_aligns_state_and_retries(self, state_service, mock_repos, git_manager, tmp_path):
+        state_repo, _ = mock_repos
+        state_repo.create(
+            State(
+                state_number=0,
+                user_prompt="Genesis",
+                branch_name="main",
+                git_diff_info="initial",
+                hash="hash0",
+                file_hashes={"tracked.txt": "expected-old"},
+            )
+        )
+        state_repo.set_current(0)
+
+        aligned_state = State(
+            state_number=1,
+            user_prompt="Aligned",
+            branch_name="main",
+            git_diff_info="alignment",
+            hash="hash1",
+            file_hash_deltas={"tracked.txt": "abc123"},
+        )
+        state_repo.create(aligned_state)
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        (project_path / "tracked.txt").write_text("content", encoding="utf-8")
+
+        with patch.object(
+            state_service,
+            "_create_recovery_transition_for_project",
+            return_value=(True, aligned_state, "aligned"),
+        ) as align_mock:
+            result_success, result_payload, result_message = state_service.fix_volume_path(
+                str(project_path)
+            )
+
+        assert result_success is True
+        assert result_payload is not None
+        assert result_payload["current_state"] == 1
+        assert result_payload["recovery_transition_created"] is True
+        assert "recovered successfully" in result_message
+        align_mock.assert_called_once()

@@ -58,6 +58,16 @@ class StateRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_metadata(self, key: str) -> Optional[str]:
+        """Return a metadata value by key, or None when missing."""
+        pass
+
+    @abstractmethod
+    def set_metadata(self, key: str, value: str) -> bool:
+        """Persist a metadata key/value pair."""
+        pass
+
 
 class TransitionRepository(ABC):
     @abstractmethod

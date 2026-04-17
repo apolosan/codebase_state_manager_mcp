@@ -121,6 +121,36 @@ class TestNeo4jStateRepository:
         assert current is not None
         assert current.state_number == 2
 
+    def test_get_current_state_respects_metadata_pointing_to_zero(self, neo4j_repos):
+        """Test that metadata can point explicitly to genesis state 0."""
+        state_repo, _ = neo4j_repos
+
+        genesis = State(
+            state_number=0,
+            user_prompt="Genesis state",
+            branch_name="main",
+            git_diff_info="initial",
+            hash="hash0",
+            file_hashes={"tracked.txt": "abc123"},
+        )
+        newer = State(
+            state_number=1,
+            user_prompt="Next state",
+            branch_name="main",
+            git_diff_info="diff",
+            hash="hash1",
+            file_hash_deltas={"tracked.txt": "def456"},
+        )
+
+        assert state_repo.create(genesis) is True
+        assert state_repo.create(newer) is True
+        assert state_repo.set_current(0) is True
+
+        current = state_repo.get_current()
+        assert current is not None
+        assert current.state_number == 0
+        assert current.file_hashes == {"tracked.txt": "abc123"}
+
     def test_state_exists(self, neo4j_repos):
         """Test checking if a state exists."""
         state_repo, _ = neo4j_repos

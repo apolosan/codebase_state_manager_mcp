@@ -17,7 +17,7 @@ class TestVolumeFixJobs:
         assert first["job_id"] == second["job_id"]
         assert second["already_running"] is True
 
-    def test_start_returns_completed_job_for_same_finished_request(self):
+    def test_start_creates_new_job_after_finished_request(self):
         from src.mcp_server.tools.volume_fix_jobs import VolumeFixJobManager
 
         manager = VolumeFixJobManager()
@@ -36,13 +36,14 @@ class TestVolumeFixJobs:
             }
         )
 
-        with patch.object(manager, "_submit", return_value=completed_future):
+        next_future = Future()
+
+        with patch.object(manager, "_submit", side_effect=[completed_future, next_future]):
             first = manager.start(state_service, "/tmp/project")
+            second = manager.start(state_service, "/tmp/project")
 
-        second = manager.start(state_service, "/tmp/project")
-
-        assert first["job_id"] == second["job_id"]
-        assert second["status"] == "completed"
+        assert first["job_id"] != second["job_id"]
+        assert second["status"] in {"pending", "running"}
         assert second["already_running"] is False
 
     def test_get_result_returns_completed_payload_idempotently(self):

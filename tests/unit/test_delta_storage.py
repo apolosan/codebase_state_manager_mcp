@@ -109,6 +109,65 @@ class TestDeltaStorage:
         }
         assert reconstructed == expected
 
+    def test_new_transition_uses_current_state_as_delta_baseline(self):
+        """Transition deltas must be computed against the current state, not the previous one."""
+        mock_state_repo = MagicMock()
+        mock_transition_repo = MagicMock()
+        mock_git_manager = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.docker_volume_name = "/tmp/volume"
+        mock_settings.sqlite_path = "/tmp/test.db"
+
+        current_state = State(
+            state_number=2,
+            user_prompt="Current",
+            branch_name="main",
+            git_diff_info="",
+            hash="current_hash",
+            file_hash_deltas={"file.txt": "current-hash"},
+        )
+        genesis_state = State(
+            state_number=0,
+            user_prompt="Genesis",
+            branch_name="main",
+            git_diff_info="",
+            hash="genesis_hash",
+            file_hashes={"file.txt": "genesis-hash"},
+        )
+        state1 = State(
+            state_number=1,
+            user_prompt="State 1",
+            branch_name="main",
+            git_diff_info="",
+            hash="state1_hash",
+            file_hash_deltas={"file.txt": "state1-hash"},
+        )
+
+        mock_state_repo.get_current.return_value = current_state
+        mock_state_repo.get_by_number.side_effect = lambda n: {0: genesis_state, 1: state1, 2: current_state}.get(n)
+        mock_state_repo.create_next.side_effect = lambda state: setattr(state, "state_number", 3) or True
+        mock_state_repo.set_current.return_value = True
+        mock_transition_repo.create_next.return_value = True
+        mock_git_manager.compute_changes_since_last_state.return_value = ("{}", {"file.txt": "new-hash"})
+
+        service = StateService(
+            state_repo=mock_state_repo,
+            transition_repo=mock_transition_repo,
+            git_manager=mock_git_manager,
+            settings=mock_settings,
+        )
+        service._project_path = Path("/tmp/project")
+        service.branch_detector = MagicMock()
+        service.branch_detector.get_current_branch_name.return_value = "main"
+
+        with patch("src.mcp_server.services.state_service.is_initialized", return_value=True):
+            success, _, _ = service.new_state_transition("Recovery prompt")
+
+        assert success is True
+        assert mock_git_manager.compute_changes_since_last_state.call_args.kwargs["last_state_file_hashes"] == {
+            "file.txt": "current-hash"
+        }
+
     def test_state_model_with_deltas(self):
         """Test State model handles deltas correctly."""
         state = State(

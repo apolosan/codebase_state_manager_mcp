@@ -34,6 +34,7 @@ class Neo4jStateRepository(StateRepository):
                      s.git_diff_info = $git_diff_info,
                          s.hash = $hash,
                          s.created_at = $created_at,
+                         s.file_hashes = $file_hashes,
                          s.file_hash_deltas = $file_hash_deltas
                      RETURN s
                     """,
@@ -43,6 +44,7 @@ class Neo4jStateRepository(StateRepository):
                     git_diff_info=state.git_diff_info,
                     hash=state.hash,
                     created_at=state.created_at.isoformat() if state.created_at else None,
+                    file_hashes=json.dumps(state.file_hashes) if state.file_hashes else None,
                     file_hash_deltas=(
                         json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
                     ),
@@ -100,7 +102,7 @@ class Neo4jStateRepository(StateRepository):
                 RETURN m.state_number AS state_number
                 """)
             metadata_record = metadata_result.single()
-            if metadata_record and metadata_record["state_number"]:
+            if metadata_record and metadata_record["state_number"] is not None:
                 return self.get_by_number(metadata_record["state_number"])
 
             result = session.run("""
@@ -272,6 +274,43 @@ class Neo4jStateRepository(StateRepository):
                     SET m.state_number = $state_number
                     """,
                     state_number=state_number,
+                )
+                return True
+            except Exception:
+                return False
+
+    def get_metadata(self, key: str) -> Optional[str]:
+        with self.driver.session() as session:
+            try:
+                result = session.run(
+                    """
+                    MATCH (m:Metadata {key: $key})
+                    RETURN m.value AS value, m.state_number AS state_number
+                    """,
+                    key=key,
+                )
+                record = result.single()
+                if not record:
+                    return None
+                if record.get("value") is not None:
+                    return str(record["value"])
+                if record.get("state_number") is not None:
+                    return str(record["state_number"])
+                return None
+            except Exception:
+                return None
+
+    def set_metadata(self, key: str, value: str) -> bool:
+        with self.driver.session() as session:
+            try:
+                session.run(
+                    """
+                    MERGE (m:Metadata {key: $key})
+                    SET m.value = $value
+                    REMOVE m.state_number
+                    """,
+                    key=key,
+                    value=value,
                 )
                 return True
             except Exception:

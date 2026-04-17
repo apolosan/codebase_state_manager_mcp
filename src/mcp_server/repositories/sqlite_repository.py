@@ -100,6 +100,12 @@ class SQLiteStateRepository(StateRepository):
                         file_hashes = json.loads(state_model.file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
+                file_hash_deltas = {}
+                if state_model.file_hash_deltas:
+                    try:
+                        file_hash_deltas = json.loads(state_model.file_hash_deltas)
+                    except json.JSONDecodeError:
+                        file_hash_deltas = {}
                 return State(
                     state_number=state_model.state_number,
                     user_prompt=state_model.user_prompt,
@@ -107,7 +113,8 @@ class SQLiteStateRepository(StateRepository):
                     git_diff_info=state_model.git_diff_info,
                     hash=state_model.hash,
                     created_at=state_model.created_at,
-                    file_hashes=file_hashes,
+                    file_hashes=file_hashes if file_hashes else None,
+                    file_hash_deltas=file_hash_deltas,
                 )
             return None
         finally:
@@ -129,6 +136,12 @@ class SQLiteStateRepository(StateRepository):
                         file_hashes = json.loads(state_model.file_hashes)
                     except json.JSONDecodeError:
                         file_hashes = {}
+                file_hash_deltas = {}
+                if state_model.file_hash_deltas:
+                    try:
+                        file_hash_deltas = json.loads(state_model.file_hash_deltas)
+                    except json.JSONDecodeError:
+                        file_hash_deltas = {}
                 return State(
                     state_number=state_model.state_number,
                     user_prompt=state_model.user_prompt,
@@ -136,7 +149,8 @@ class SQLiteStateRepository(StateRepository):
                     git_diff_info=state_model.git_diff_info,
                     hash=state_model.hash,
                     created_at=state_model.created_at,
-                    file_hashes=file_hashes,
+                    file_hashes=file_hashes if file_hashes else None,
+                    file_hash_deltas=file_hash_deltas,
                 )
             return None
         finally:
@@ -338,6 +352,27 @@ class SQLiteStateRepository(StateRepository):
                 f"Unexpected error setting current state to {state_number}: {type(e).__name__}: {e}",
                 exc_info=True,
             )
+            return False
+        finally:
+            session.close()
+
+    def get_metadata(self, key: str) -> Optional[str]:
+        session = self.session_factory()
+        try:
+            metadata = session.query(MetadataModel).filter_by(key=key).first()
+            return metadata.value if metadata else None
+        finally:
+            session.close()
+
+    def set_metadata(self, key: str, value: str) -> bool:
+        session = self.session_factory()
+        try:
+            session.query(MetadataModel).filter_by(key=key).delete()
+            session.add(MetadataModel(key=key, value=value))
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
             return False
         finally:
             session.close()

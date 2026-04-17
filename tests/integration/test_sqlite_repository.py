@@ -168,6 +168,33 @@ class TestSQLiteStateRepository:
         assert result1 is True
         assert result2 is True
 
+    def test_get_by_number_restores_file_hash_deltas(self, sqlite_repos):
+        """Test that transition states keep file hash deltas when reloaded."""
+        state_repo, _ = sqlite_repos
+
+        state = State(
+            state_number=1,
+            user_prompt="Transition state",
+            branch_name="main",
+            git_diff_info="diff",
+            hash="hash1",
+            file_hash_deltas={"tracked.txt": "abc123", "removed.txt": None},
+        )
+
+        assert state_repo.create(state) is True
+
+        retrieved = state_repo.get_by_number(1)
+        assert retrieved is not None
+        assert retrieved.file_hashes is None
+        assert retrieved.file_hash_deltas == {"tracked.txt": "abc123", "removed.txt": None}
+
+    def test_metadata_roundtrip(self, sqlite_repos):
+        """Test storing and reading generic metadata values."""
+        state_repo, _ = sqlite_repos
+
+        assert state_repo.set_metadata("managed_project_path", "/tmp/radoc") is True
+        assert state_repo.get_metadata("managed_project_path") == "/tmp/radoc"
+
 
 class TestSQLiteTransitionRepository:
     """Integration tests for SQLite Transition Repository."""
