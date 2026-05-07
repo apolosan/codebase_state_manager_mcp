@@ -10,6 +10,7 @@ from ..repositories.abstract_repositories import StateRepository, TransitionRepo
 from ..repositories.sqlite_repository import SQLiteStateRepository
 from ..services.branch_detection_service import BranchDetectionService
 from ..services.git_manager import GitManager, GitOperationError
+from ..services.scc_codec import build_current_state_preview, encode_state_for_llm
 from ..utils.audit import get_audit_logger
 from ..utils.consistency_checker import ConsistencyChecker
 from ..utils.hash import generate_state_hash
@@ -19,6 +20,7 @@ from ..utils.security import RateLimitExceeded, get_rate_limiter
 from ..utils.validation import (
     ValidationError,
     sanitize_prompt,
+    validate_reward,
     validate_state_number,
     validate_state_range,
 )
@@ -142,11 +144,18 @@ class StateService:
         env_project_path = os.getenv("MANAGED_PROJECT_PATH")
         persisted_project_path = None
         try:
-            persisted_project_path = self.state_repo.get_metadata(self.MANAGED_PROJECT_PATH_METADATA_KEY)
+            persisted_project_path = self.state_repo.get_metadata(
+                self.MANAGED_PROJECT_PATH_METADATA_KEY
+            )
         except Exception:
             persisted_project_path = None
 
-        for raw_path in [env_project_path, persisted_project_path, provided_project_path, str(self._project_path)]:
+        for raw_path in [
+            env_project_path,
+            persisted_project_path,
+            provided_project_path,
+            str(self._project_path),
+        ]:
             if not raw_path:
                 continue
             candidate = Path(raw_path).expanduser().resolve()
@@ -166,7 +175,9 @@ class StateService:
         missing = sorted(expected_paths - rebuilt_paths)
         extra = sorted(rebuilt_paths - expected_paths)
         changed = sorted(
-            path for path in rebuilt_paths & expected_paths if rebuilt_hashes[path] != expected_hashes[path]
+            path
+            for path in rebuilt_paths & expected_paths
+            if rebuilt_hashes[path] != expected_hashes[path]
         )
         details = [
             f"missing={len(missing)}",
@@ -243,34 +254,31 @@ class StateService:
         current_branch: Optional[str] = None,
         current_diff: Optional[str] = None,
     ) -> tuple[bool, Optional[State], str]:
-        if self._is_initialized(volume_path):
-            return False, None, "State manager already initialized. Call reset first."
-
         try:
-            source_path = Path(project_path)
-            self._remember_project_path(source_path.resolve())
-            target_path = Path(volume_path) / "codebase"
+            source_path = Path(project_path).resolve()
+            volume_root = Path(volume_path).resolve()
+
+            if self._is_initialized(str(volume_root)):
+                return False, None, "State manager already initialized. Call reset first."
+
+            self._remember_project_path(source_path)
+            target_path = volume_root / "codebase"
 
             # Validate that target_path is not inside source_path to prevent recursion
-            try:
-                if target_path.is_relative_to(source_path):
-                    return (
-                        False,
-                        None,
-                        (
-                            "Volume path must be outside the project path. "
-                            f"Got volume_path='{volume_path}' which resolves to "
-                            f"'{target_path}' inside project_path='{project_path}'. "
-                            "This would cause infinite recursion during file copy."
-                        ),
-                    )
-            except ValueError:
-                # is_relative_to can raise ValueError if paths are on different drives (Windows)
-                # In this case, they're definitely not relative to each other
-                pass
+            if target_path.is_relative_to(source_path):
+                return (
+                    False,
+                    None,
+                    (
+                        "Volume path must be outside the project path. "
+                        f"Got volume_path='{volume_path}' which resolves to "
+                        f"'{target_path}' inside project_path='{source_path}'. "
+                        "This would cause infinite recursion during file copy."
+                    ),
+                )
 
             # Create volume directory
-            Path(volume_path).mkdir(parents=True, exist_ok=True)
+            volume_root.mkdir(parents=True, exist_ok=True)
 
             # Initialize ignore manager for intelligent filtering
             ignore_manager = self._ignore_manager
@@ -296,6 +304,11 @@ class StateService:
             file_hashes = self.git_manager.get_directory_hashes(
                 source_path, ignore_manager=ignore_manager
             )
+            compact_payload = encode_state_for_llm(
+                state_repo=self.state_repo,
+                git_diff_info=diff_info,
+                file_hashes=file_hashes,
+            )
 
             state_0 = State(
                 state_number=0,
@@ -307,6 +320,9 @@ class StateService:
                 file_hash_deltas={
                     k: v for k, v in file_hashes.items()
                 },  # Genesis stores full hashes as deltas too
+                llm_context=str(compact_payload["llm_context"]),
+                compression_version=str(compact_payload["compression_version"]),
+                compacted_at=compact_payload["compacted_at"],
             )
             state_0.hash = generate_state_hash(
                 state_0.user_prompt,
@@ -321,9 +337,11 @@ class StateService:
             if not self.state_repo.set_current(0):
                 return False, state_0, "Failed to set current state to genesis state"
 
-            self.settings.docker_volume_name = volume_path
+            resolved_volume_path = str(volume_root)
+            self.settings.docker_volume_name = resolved_volume_path
+            self.settings.volume_path = resolved_volume_path
 
-            if not set_initialized(volume_path, True):
+            if not set_initialized(resolved_volume_path, True):
                 return False, None, "Failed to set initialized flag"
 
             self._initialized_cache = True
@@ -343,6 +361,10 @@ class StateService:
         file_hash_deltas: dict,
         project_path: Path,
         current_branch_name: Optional[str] = None,
+        reward: float | None = None,
+        llm_context: str | None = None,
+        compression_version: str | None = None,
+        compacted_at=None,
     ) -> tuple[bool, Optional[State], str]:
         """Create a new state and transition atomically.
 
@@ -359,6 +381,11 @@ class StateService:
             sanitized_prompt = sanitize_prompt(user_prompt)
         except ValidationError as e:
             return False, None, f"Invalid prompt: {e}"
+
+        try:
+            validated_reward = validate_reward(reward)
+        except ValidationError as e:
+            return False, None, f"Invalid reward: {e}"
 
         # CORREÇÃO CRÍTICA: Capturar branch atual do filesystem, não do estado anterior
         resolved_branch_name = current_branch_name or self.branch_detector.get_current_branch_name(
@@ -381,6 +408,9 @@ class StateService:
             hash="",  # Will be generated by create_next
             file_hashes=file_hashes,
             file_hash_deltas=file_hash_deltas,  # Store only deltas
+            llm_context=llm_context,
+            compression_version=compression_version,
+            compacted_at=compacted_at,
         )
 
         try:
@@ -394,6 +424,7 @@ class StateService:
                 current_state=current_state.state_number,
                 next_state=new_state.state_number,
                 user_prompt=sanitized_prompt,
+                reward=validated_reward,
             )
             if not self.transition_repo.create_next(transition):
                 # Rollback: delete the created state
@@ -410,8 +441,18 @@ class StateService:
                     f"Failed to update current state pointer to {new_state.state_number}. "
                     f"Rolling back state and transition"
                 )
-                # Note: We don't have a delete_transition method, but the orphaned
-                # transition won't cause issues. The critical part is the state.
+                try:
+                    if not self.transition_repo.delete(transition.transition_id):
+                        logging.error(
+                            "Failed to delete orphan transition %s during rollback",
+                            transition.transition_id,
+                        )
+                except Exception as rollback_error:
+                    logging.error(
+                        "Rollback failed while deleting transition %s: %s",
+                        transition.transition_id,
+                        rollback_error,
+                    )
                 self.state_repo.delete(new_state.state_number)
                 return (
                     False,
@@ -427,7 +468,9 @@ class StateService:
         except Exception as e:
             return False, None, f"Atomic operation failed: {e}"
 
-    def new_state_transition(self, user_prompt: str) -> tuple[bool, Optional[State], str]:
+    def new_state_transition(
+        self, user_prompt: str, reward: float | None = None
+    ) -> tuple[bool, Optional[State], str]:
         if not self._is_initialized(self.settings.docker_volume_name):
             return False, None, "State manager not initialized. Call genesis first."
 
@@ -501,6 +544,16 @@ class StateService:
             is_genesis=False,  # Transitions are not genesis
             ignore_manager=ignore_manager,
         )
+        compact_hashes = {
+            file_path: hash_value
+            for file_path, hash_value in delta_hashes.items()
+            if hash_value is not None
+        }
+        compact_payload = encode_state_for_llm(
+            state_repo=self.state_repo,
+            git_diff_info=diff_info,
+            file_hashes=compact_hashes,
+        )
 
         # For delta storage optimization: store only deltas for transition states
         # Don't reconstruct full hashes here - store deltas only
@@ -512,6 +565,10 @@ class StateService:
             delta_hashes,  # Store actual deltas for optimization
             project_path,  # NOVO: Passar project_path
             current_branch_name=current_branch_name,
+            reward=reward,
+            llm_context=str(compact_payload["llm_context"]),
+            compression_version=str(compact_payload["compression_version"]),
+            compacted_at=compact_payload["compacted_at"],
         )
 
         # Note: set_current() is now called inside _create_state_and_transition_atomic()
@@ -524,6 +581,7 @@ class StateService:
                         source_path=project_path,
                         volume_path=volume_codebase_path,
                         sync_git=True,
+                        ignore_manager=ignore_manager,
                     )
             except (GitOperationError, OSError) as e:
                 logging.warning(
@@ -588,11 +646,15 @@ class StateService:
         if not self.state_repo.set_current(target_state.state_number):
             return (
                 False,
-                target_state,
+                self._ensure_compact_state_context(target_state),
                 "Transition created but failed to update current state pointer",
             )
 
-        return True, target_state, f"Arbitrary transition to state {next_state} successful"
+        return (
+            True,
+            self._ensure_compact_state_context(target_state),
+            f"Arbitrary transition to state {next_state} successful",
+        )
 
     def fix_volume_path(
         self, project_path: Optional[str] = None
@@ -656,20 +718,18 @@ class StateService:
                 if used_source_path is None or current_project_hashes is None:
                     return False, None, "Failed to inspect project snapshot for recovery"
 
-                created, created_state, creation_message = self._create_recovery_transition_for_project(
-                    project_path=used_source_path,
-                    current_state=current_state,
+                created, created_state, creation_message = (
+                    self._create_recovery_transition_for_project(
+                        project_path=used_source_path,
+                        current_state=current_state,
+                    )
                 )
                 if not created or created_state is None:
                     return (
                         False,
                         None,
                         "Project snapshot diverges from the current state stored in the database"
-                        + (
-                            f" ({last_mismatch_summary})"
-                            if last_mismatch_summary
-                            else ""
-                        )
+                        + (f" ({last_mismatch_summary})" if last_mismatch_summary else "")
                         + f"; failed to create recovery transition: {creation_message}",
                     )
 
@@ -680,7 +740,9 @@ class StateService:
             if used_source_path is None:
                 return False, None, "No project path selected for recovery"
 
-            if not self.git_manager.clone_to_volume(used_source_path, codebase_path, ignore_manager):
+            if not self.git_manager.clone_to_volume(
+                used_source_path, codebase_path, ignore_manager
+            ):
                 return False, None, "Failed to rebuild codebase snapshot in volume"
 
             rebuilt_hashes = self.git_manager.get_directory_hashes(
@@ -714,7 +776,9 @@ class StateService:
                 )
                 remaining_issues = checker.check_all()
                 blocking_issues = [
-                    issue.message for issue in remaining_issues if issue.severity in {"critical", "error"}
+                    issue.message
+                    for issue in remaining_issues
+                    if issue.severity in {"critical", "error"}
                 ]
                 if blocking_issues:
                     shutil.rmtree(codebase_path, ignore_errors=True)
@@ -746,7 +810,7 @@ class StateService:
             return None, "State manager not initialized. Call genesis first."
         state = self.state_repo.get_current()
         if state:
-            return state, "Current state retrieved"
+            return self._ensure_compact_state_context(state), "Current state retrieved"
         return None, "No state found"
 
     def get_current_state_number(self) -> tuple[Optional[int], str]:
@@ -762,8 +826,109 @@ class StateService:
             return None, "State manager not initialized. Call genesis first."
         state = self.state_repo.get_by_number(state_number)
         if state:
-            return state, f"State {state_number} info retrieved"
+            return self._ensure_compact_state_context(state), f"State {state_number} info retrieved"
         return None, f"State {state_number} not found"
+
+    def _get_generation_reward_by_state(self) -> dict[int, float | None]:
+        total_transitions = self.transition_repo.count()
+        if total_transitions <= 0:
+            return {}
+
+        rewards_by_state: dict[int, float | None] = {}
+        transitions = self.transition_repo.get_last(total_transitions)
+        for transition in sorted(transitions, key=lambda item: int(item.transition_id)):
+            rewards_by_state.setdefault(transition.next_state, transition.reward)
+        return rewards_by_state
+
+    def _compact_state_payload_with_reward(
+        self,
+        state: State,
+        generation_rewards: dict[int, float | None],
+    ) -> dict[str, object]:
+        compact_state = self._ensure_compact_state_context(state)
+        raw_payload = compact_state.to_dict()
+        payload: dict[str, object] = {
+            "state_number": raw_payload.get("state_number"),
+            "llm_context": raw_payload.get("llm_context"),
+            "compression_version": raw_payload.get("compression_version"),
+            "compacted_at": raw_payload.get("compacted_at"),
+        }
+        reward = generation_rewards.get(compact_state.state_number)
+        if reward is not None:
+            payload["reward"] = reward
+        return payload
+
+    def get_compact_states(
+        self,
+        state: int | None = None,
+        start_state: int | None = None,
+        end_state: int | None = None,
+    ) -> tuple[bool, list[dict[str, object]], str]:
+        if not self._is_initialized(self.settings.docker_volume_name):
+            return False, [], "State manager not initialized. Call genesis first."
+
+        has_single_state = state is not None
+        has_range_state = start_state is not None or end_state is not None
+        if has_single_state and has_range_state:
+            return (
+                False,
+                [],
+                "Invalid selector: provide exactly one selector mode (state or start_state + end_state)",
+            )
+        if (start_state is None) != (end_state is None):
+            return (
+                False,
+                [],
+                "Invalid selector: start_state and end_state must be provided together",
+            )
+
+        selected_states: list[State]
+        if state is not None:
+            if state < 0:
+                return False, [], "Invalid selector: state must be non-negative"
+            state_obj = self.state_repo.get_by_number(state)
+            if state_obj is None:
+                return False, [], f"State {state} not found"
+            selected_states = [state_obj]
+            message = f"Compact state {state} retrieved"
+        elif start_state is not None and end_state is not None:
+            if start_state < 0 or end_state < 0:
+                return False, [], "Invalid selector: state range must be non-negative"
+            if start_state > end_state:
+                return (
+                    False,
+                    [],
+                    "Invalid selector: start_state cannot be greater than end_state",
+                )
+            all_states = self.state_repo.get_all()
+            selected_states = [
+                candidate
+                for candidate in all_states
+                if start_state <= candidate.state_number <= end_state
+            ]
+            found_numbers = {candidate.state_number for candidate in selected_states}
+            missing_states = [
+                state_number
+                for state_number in range(start_state, end_state + 1)
+                if state_number not in found_numbers
+            ]
+            if missing_states:
+                return (
+                    False,
+                    [],
+                    f"State range {start_state}-{end_state} contains missing states: {missing_states}",
+                )
+            message = f"Compact states {start_state}-{end_state} retrieved"
+        else:
+            selected_states = self.state_repo.get_all()
+            message = f"All compact states retrieved: {len(selected_states)} total"
+
+        generation_rewards = self._get_generation_reward_by_state()
+        compact_states = [
+            self._compact_state_payload_with_reward(selected_state, generation_rewards)
+            for selected_state in selected_states
+        ]
+        return True, compact_states, message
 
     def total_states(self) -> tuple[int, str]:
         if not self._is_initialized(self.settings.docker_volume_name):
@@ -776,23 +941,94 @@ class StateService:
         results = self.state_repo.search(text)
         return results, f"Found {len(results)} states matching '{text}'"
 
+    def get_current_state_compact_context(
+        self, include_vocabulary: bool = False
+    ) -> tuple[Optional[dict[str, object]], str]:
+        if not self._is_initialized(self.settings.docker_volume_name):
+            return None, "State manager not initialized. Call genesis first."
+
+        current_state = self.state_repo.get_current()
+        if not current_state:
+            return None, "No current state found. Call genesis first."
+
+        ignore_manager = self._ignore_manager
+        project_path = self._project_path
+        volume_codebase_path = Path(self.settings.docker_volume_name) / "codebase"
+        if not volume_codebase_path.exists():
+            volume_codebase_path = None  # type: ignore[assignment]
+
+        try:
+            last_hashes = self._get_current_full_hashes(current_state)
+        except StateNotFoundError:
+            last_hashes = {}
+
+        diff_info, delta_hashes = self.git_manager.compute_changes_since_last_state(
+            project_path=project_path,
+            last_state_file_hashes=last_hashes,
+            volume_codebase_path=volume_codebase_path,
+            is_genesis=False,
+            ignore_manager=ignore_manager,
+        )
+        compact_hashes = {
+            file_path: hash_value
+            for file_path, hash_value in delta_hashes.items()
+            if hash_value is not None
+        }
+        preview = build_current_state_preview(
+            state_repo=self.state_repo,
+            git_diff_info=diff_info,
+            file_hashes=compact_hashes,
+            include_vocabulary=include_vocabulary,
+        )
+        return {
+            "current_state": current_state.state_number,
+            "preview": preview,
+        }, "Current workspace compact context generated"
+
+    def _ensure_compact_state_context(self, state: State) -> State:
+        if state.llm_context and state.compression_version and state.compacted_at:
+            return state
+
+        available_hashes = dict(state.file_hashes or {})
+        if not available_hashes:
+            available_hashes = {
+                file_path: hash_value
+                for file_path, hash_value in state.file_hash_deltas.items()
+                if hash_value is not None
+            }
+
+        compact_payload = encode_state_for_llm(
+            state_repo=self.state_repo,
+            git_diff_info=state.git_diff_info,
+            file_hashes=available_hashes,
+        )
+        state.llm_context = str(compact_payload["llm_context"])
+        state.compression_version = str(compact_payload["compression_version"])
+        state.compacted_at = compact_payload["compacted_at"]
+        return state
+
+    def _transition_payload(
+        self, transition: Transition, state_number: Optional[int] = None
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "transition_id": str(transition.transition_id),
+            "source_state": transition.current_state,
+            "destination_state": transition.next_state,
+            "user_prompt": transition.user_prompt,
+            "timestamp": transition.timestamp.isoformat() if transition.timestamp else None,
+            "reward": transition.reward,
+        }
+        if state_number is not None:
+            payload["role"] = (
+                "source" if transition.current_state == state_number else "destination"
+            )
+        return payload
+
     def get_state_transitions(self, state_number: int) -> tuple[list, str]:
         if not self._is_initialized(self.settings.docker_volume_name):
             return [], "State manager not initialized. Call genesis first."
         transitions = self.transition_repo.get_by_state(state_number)
-        result = []
-        for t in transitions:
-            role = "source" if t.current_state == state_number else "destination"
-            result.append(
-                {
-                    "transition_id": str(t.transition_id),
-                    "role": role,
-                    "source_state": t.current_state,
-                    "destination_state": t.next_state,
-                    "user_prompt": t.user_prompt,
-                    "timestamp": t.timestamp.isoformat() if t.timestamp else None,
-                }
-            )
+        result = [self._transition_payload(transition, state_number) for transition in transitions]
         return result, f"Transitions for state {state_number} retrieved: {len(result)} total"
 
     def get_transition_info(self, transition_id: str) -> tuple[Optional[dict], str]:
@@ -821,6 +1057,78 @@ class StateService:
             return dict(current_state.file_hashes)
 
         return self._get_full_hashes_for_state(current_state.state_number)
+
+    def get_rewarded_transitions(self) -> tuple[list[dict[str, object]], str]:
+        if not self._is_initialized(self.settings.docker_volume_name):
+            return [], "State manager not initialized. Call genesis first."
+        transitions = self.transition_repo.get_rewarded()
+        result = [self._transition_payload(transition) for transition in transitions]
+        return result, f"Rewarded transitions retrieved: {len(result)} total"
+
+    def set_transition_reward(
+        self,
+        reward: float | None,
+        transition_id: int | None = None,
+        current_state: int | None = None,
+        next_state: int | None = None,
+    ) -> tuple[bool, Optional[dict[str, object]], str]:
+        if not self._is_initialized(self.settings.docker_volume_name):
+            return False, None, "State manager not initialized. Call genesis first."
+
+        try:
+            validated_reward = validate_reward(reward)
+        except ValidationError as e:
+            return False, None, f"Invalid reward: {e}"
+
+        has_transition_id = transition_id is not None
+        has_any_pair_value = current_state is not None or next_state is not None
+        has_full_pair = current_state is not None and next_state is not None
+
+        if has_transition_id == has_any_pair_value:
+            return (
+                False,
+                None,
+                "Invalid selector: provide exactly one selector mode (transition_id or current_state + next_state)",
+            )
+
+        if not has_transition_id and not has_full_pair:
+            return (
+                False,
+                None,
+                "Invalid selector: current_state and next_state must be provided together",
+            )
+
+        if transition_id is not None:
+            transition = self.transition_repo.get_by_id(transition_id)
+            if transition is None:
+                return False, None, f"Transition {transition_id} not found"
+        else:
+            matches = self.transition_repo.get_by_state_pair(current_state or 0, next_state or 0)
+            if not matches:
+                return (
+                    False,
+                    None,
+                    f"No transition found for pair ({current_state}, {next_state})",
+                )
+            if len(matches) > 1:
+                return (
+                    False,
+                    None,
+                    "Ambiguous transition selector: multiple transitions match the state pair; use transition_id",
+                )
+            transition = matches[0]
+
+        previous_reward = transition.reward
+        if not self.transition_repo.update_reward(transition.transition_id, validated_reward):
+            return False, None, "Failed to update transition reward"
+
+        updated_transition = self.transition_repo.get_by_id(transition.transition_id)
+        if updated_transition is None:
+            return False, None, "Transition reward updated but transition could not be reloaded"
+
+        payload = self._transition_payload(updated_transition)
+        payload["previous_reward"] = previous_reward
+        return True, payload, "Transition reward updated"
 
     def track_transitions(self) -> tuple[list, str]:
         if not self._is_initialized(self.settings.docker_volume_name):

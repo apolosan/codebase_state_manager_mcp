@@ -2,6 +2,7 @@ import tempfile
 from pathlib import Path
 
 from src.mcp_server.services.git_manager import GitManager
+from src.mcp_server.utils.ignore_manager import IgnoreManager
 
 
 def test_get_directory_hashes_excludes_binaries():
@@ -74,3 +75,53 @@ def test_binary_content_detection():
 
         # Clean up large file to avoid disk space issues
         large.unlink()
+
+
+def test_sync_project_to_volume_replaces_target_and_matches_hashes():
+    """Test sync_project_to_volume fully refreshes the target copy."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        source = root / "source"
+        target = root / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "tracked.txt").write_text("new content")
+        (source / "nested").mkdir()
+        (source / "nested" / "child.txt").write_text("child content")
+
+        (target / "tracked.txt").write_text("old content")
+        (target / "stale.txt").write_text("remove me")
+
+        manager = GitManager()
+
+        assert manager.sync_project_to_volume(source, target) is True
+        assert (target / "tracked.txt").read_text() == "new content"
+        assert not (target / "stale.txt").exists()
+        assert manager.get_directory_hashes(source) == manager.get_directory_hashes(target)
+
+
+def test_sync_project_to_volume_respects_nested_gitignore_component_patterns():
+    """Test sync_project_to_volume excludes nested node_modules/.next from plain .gitignore names."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        source = root / "source"
+        target = root / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / ".gitignore").write_text("node_modules\n.next\n")
+        (source / "frontend" / "node_modules" / "react").mkdir(parents=True)
+        (source / "frontend" / "node_modules" / "react" / "package.json").write_text("{}")
+        (source / "frontend" / ".next" / "cache").mkdir(parents=True)
+        (source / "frontend" / ".next" / "cache" / "build.txt").write_text("cache")
+        (source / "frontend" / "src").mkdir(parents=True)
+        (source / "frontend" / "src" / "app.ts").write_text("export const ok = true;\n")
+
+        manager = GitManager()
+        ignore_manager = IgnoreManager()
+
+        assert manager.sync_project_to_volume(source, target, ignore_manager=ignore_manager) is True
+        assert not (target / "frontend" / "node_modules").exists()
+        assert not (target / "frontend" / ".next").exists()
+        assert (target / "frontend" / "src" / "app.ts").exists()

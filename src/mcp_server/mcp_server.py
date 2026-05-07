@@ -29,28 +29,32 @@ from .repositories.sqlite_repository import (
     create_sqlite_repositories,
 )
 from .services.git_manager import GitManager
+from .services.neo4j_bootstrap import prepare_neo4j_connection
 from .services.state_service import StateService
 from .tools import (
     arbitrary_state_transition,
     fix_volume_path,
     genesis,
+    get_compact_states,
+    get_current_state_compact_context,
     get_current_state_info,
     get_current_state_number,
     get_fix_volume_path_result,
     get_fix_volume_path_status,
     get_genesis_result,
     get_genesis_status,
+    get_rewarded_transitions,
     get_state_info,
     get_state_transitions,
     get_transition_info,
     new_state_transition,
     search_states,
+    set_transition_reward,
     start_fix_volume_path,
     start_genesis,
     total_states,
     track_transitions,
 )
-
 settings = get_settings()
 
 # Ensure docker_volume_name matches volume_path for consistency
@@ -61,6 +65,7 @@ transition_repo: Neo4jTransitionRepository | SQLiteTransitionRepository
 
 if settings.db_mode == "neo4j":
     try:
+        settings = prepare_neo4j_connection(settings)
         state_repo, transition_repo = create_neo4j_repositories(
             uri=settings.neo4j_uri,
             user=settings.neo4j_user,
@@ -94,7 +99,7 @@ app = FastMCP("codebase-state-manager")
 
 
 @app.tool()
-async def genesis_tool() -> dict:
+async def genesis_tool(state_representation: str = "raw") -> dict:
     """Initialize the state machine for a project.
 
     Creates state #0 and sets up the codebase state machine.
@@ -112,6 +117,7 @@ async def genesis_tool() -> dict:
         state_service=state_service,
         project_path=project_path,
         volume_path=volume_path,
+        state_representation=state_representation,
     )
     return result
 
@@ -137,9 +143,9 @@ async def get_genesis_status_tool(job_id: str) -> dict:
 
 
 @app.tool()
-async def get_genesis_result_tool(job_id: str) -> dict:
+async def get_genesis_result_tool(job_id: str, state_representation: str = "raw") -> dict:
     """Get result for a background genesis job."""
-    result = get_genesis_result(job_id=job_id)
+    result = get_genesis_result(job_id=job_id, state_representation=state_representation)
     return result
 
 
@@ -194,19 +200,28 @@ async def total_states_tool() -> dict:
 
 
 @app.tool()
-async def new_state_transition_tool(user_prompt: str) -> dict:
+async def new_state_transition_tool(
+    user_prompt: str,
+    reward: float | None = None,
+    state_representation: str = "raw",
+) -> dict:
     """Create a new state transition from the current state."""
     result = new_state_transition(
         state_service=state_service,
         user_prompt=user_prompt,
+        reward=reward,
+        state_representation=state_representation,
     )
     return result
 
 
 @app.tool()
-async def get_current_state_info_tool() -> dict:
+async def get_current_state_info_tool(state_representation: str = "raw") -> dict:
     """Get full context of the current state."""
-    result = get_current_state_info(state_service=state_service)
+    result = get_current_state_info(
+        state_service=state_service,
+        state_representation=state_representation,
+    )
     return result
 
 
@@ -221,18 +236,29 @@ async def search_states_tool(text: str) -> dict:
 
 
 @app.tool()
-async def arbitrary_state_transition_tool(next_state: int, user_prompt: str | None = None) -> dict:
+async def arbitrary_state_transition_tool(
+    next_state: int,
+    user_prompt: str | None = None,
+    state_representation: str = "raw",
+) -> dict:
     """Performs an arbitrary state transition from the current state to a given next_state number."""
     result = arbitrary_state_transition(
-        state_service=state_service, next_state=next_state, user_prompt=user_prompt
+        state_service=state_service,
+        next_state=next_state,
+        user_prompt=user_prompt,
+        state_representation=state_representation,
     )
     return result
 
 
 @app.tool()
-async def get_state_info_tool(state: int) -> dict:
+async def get_state_info_tool(state: int, state_representation: str = "raw") -> dict:
     """Get information for a specific state."""
-    result = get_state_info(state_service=state_service, state=state)
+    result = get_state_info(
+        state_service=state_service,
+        state=state,
+        state_representation=state_representation,
+    )
     return result
 
 
@@ -254,6 +280,57 @@ async def get_transition_info_tool(transition_id: str) -> dict:
 async def track_transitions_tool() -> dict:
     """Get the last 5 transitions."""
     result = track_transitions(state_service=state_service)
+    return result
+
+
+@app.tool()
+async def get_current_state_compact_context_tool(include_vocabulary: bool = False) -> dict:
+    """Get a non-persisted compact preview of the current workspace."""
+    result = get_current_state_compact_context(
+        state_service=state_service,
+        include_vocabulary=include_vocabulary,
+    )
+    return result
+
+
+@app.tool()
+async def get_compact_states_tool(
+    state: int | None = None,
+    start_state: int | None = None,
+    end_state: int | None = None,
+) -> dict:
+    """Get compact state payloads for one state, an inclusive range, or all states."""
+    result = get_compact_states(
+        state_service=state_service,
+        state=state,
+        start_state=start_state,
+        end_state=end_state,
+    )
+    return result
+
+
+@app.tool()
+async def get_rewarded_transitions_tool() -> dict:
+    """Get transitions with non-null reward values."""
+    result = get_rewarded_transitions(state_service=state_service)
+    return result
+
+
+@app.tool()
+async def set_transition_reward_tool(
+    reward: float | None,
+    transition_id: int | None = None,
+    current_state: int | None = None,
+    next_state: int | None = None,
+) -> dict:
+    """Set or update a transition reward."""
+    result = set_transition_reward(
+        state_service=state_service,
+        reward=reward,
+        transition_id=transition_id,
+        current_state=current_state,
+        next_state=next_state,
+    )
     return result
 
 
@@ -427,15 +504,25 @@ registered_tool_names = [
     "start_genesis_tool",
     "get_genesis_status_tool",
     "get_genesis_result_tool",
+    "get_current_state_number_tool",
     "fix_volume_path_tool",
     "start_fix_volume_path_tool",
     "get_fix_volume_path_status_tool",
     "get_fix_volume_path_result_tool",
-    "get_current_state_number_tool",
     "total_states_tool",
     "new_state_transition_tool",
     "get_current_state_info_tool",
     "search_states_tool",
+    "arbitrary_state_transition_tool",
+    "get_state_info_tool",
+    "get_state_transitions_tool",
+    "get_transition_info_tool",
+    "track_transitions_tool",
+    "get_current_state_compact_context_tool",
+    "get_compact_states_tool",
+    "get_rewarded_transitions_tool",
+    "set_transition_reward_tool",
+    "get_current_state_transitions_tool",
     "check_consistency_tool",
     "repair_consistency_tool",
 ]

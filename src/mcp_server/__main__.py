@@ -21,6 +21,7 @@ def main() -> None:
     from src.mcp_server.repositories.neo4j_repository import create_neo4j_repositories
     from src.mcp_server.repositories.sqlite_repository import create_sqlite_repositories
     from src.mcp_server.services.git_manager import GitManager
+    from src.mcp_server.services.neo4j_bootstrap import prepare_neo4j_connection
     from src.mcp_server.services.state_service import StateService
     from src.mcp_server.tools import mcp_tools
     from src.mcp_server.utils.audit import get_audit_logger
@@ -52,6 +53,7 @@ def main() -> None:
 
     if settings.db_mode == "neo4j":
         try:
+            settings = prepare_neo4j_connection(settings)
             state_repo, transition_repo = create_neo4j_repositories(
                 uri=settings.neo4j_uri,
                 user=settings.neo4j_user,

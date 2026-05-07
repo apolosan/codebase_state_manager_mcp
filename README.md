@@ -2,294 +2,471 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-440%20passed-green.svg)]()
-[![Coverage](https://img.shields.io/badge/coverage-90%25-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-461%20passed-green.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)]()
 [![mypy](https://img.shields.io/badge/mypy-passing-green.svg)]()
-[![Bandit](https://img.shields.io/badge/bandit-clean-green.svg)]()
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)]()
-[![Status: WIP](https://img.shields.io/badge/status-WIP-yellow.svg)]()
+[![Bandit](https://img.shields.io/badge/Bandit-clean-green.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)]()
+[![Status](https://img.shields.io/badge/status-production--ready-brightgreen.svg)]()
 
-A sophisticated Model Context Protocol (MCP) server for managing codebase states with version control, graph database tracking, and containerized execution environments.
+A production-ready Model Context Protocol (MCP) server for managing codebase states as numbered snapshots and transitions, with Git-aware diffs, SCC-E compact context for LLM workflows, rewarded transitions, automatic project-scoped Neo4j bootstrap, external Neo4j support, SQLite fallback, and managed workspace snapshot recovery.
 
-**⚠️ WORK IN PROGRESS (WIP) - This project is actively under development. Features may change, APIs may evolve, and breaking changes are expected during the development phase.**
+## Current Validation Status
 
-## ⚠️ Important Notice
+Validation executed on the current codebase:
 
-**USE AT YOUR OWN RISK**
+| Check | Result |
+|---|---|
+| Test suite | `461 passed` |
+| Type checking | `uv run mypy src/` → pass |
+| Security scan | `uv run bandit -r src/ -q` → pass |
 
-This software is provided "as-is" without any warranties or guarantees. Users assume full responsibility for:
+The skipped tests are integration cases that depend on specific external runtime conditions.
 
-- Any data loss or corruption
-- Security vulnerabilities introduced through usage
-- Compliance with applicable laws and regulations
-- Proper backup and recovery procedures
-- Testing in isolated environments before production use
+---
 
-The developers are not liable for any damages, losses, or issues arising from the use of this software.
+## What the Server Does
 
-## 🚀 Features
+The server maintains a numbered history of project states.
 
-### Core Capabilities
-- **State Machine Management**: Track codebase evolution through numbered states
-- **Git Integration**: Capture diffs, branches, and commit history
-- **Graph Database Storage**: Neo4j for relationship-based state tracking
-- **SQLite Fallback**: Relational database support when Neo4j is unavailable
-- **Docker Containerization**: Isolated execution environments for git operations
+Each state stores:
+- the user prompt that motivated the change;
+- branch information;
+- textual change information (`git_diff_info`);
+- file-hash snapshots or deltas;
+- SCC-E compact context (`llm_context`, `compression_version`, `compacted_at`).
 
-### Advanced Features
-- **State Transitions**: Linear and arbitrary transitions between codebase states
-- **Content Hashing**: SHA256 hashing for state integrity verification
-- **Search & Query**: Full-text search across state prompts and diffs
-- **Performance Metrics**: Detailed timing and operation statistics
-- **Structured Logging**: JSON-formatted logs with session context
-- **Security Layers**: Input validation, rate limiting, and audit logging
+Each transition stores:
+- source state;
+- destination state;
+- user prompt;
+- timestamp;
+- optional `reward`.
 
-## 🏗️ Architecture
+This allows LLM agents and other consumers to:
+- register new transitions;
+- inspect the current or historical state;
+- preview compact context before persisting;
+- re-score historical transitions;
+- rebuild and verify the managed workspace volume.
 
-The system follows Clean Architecture principles with clear separation of concerns:
+---
 
-```
-MCP Client → Tools Layer → Services Layer → Repositories Layer → Database
-```
+## Supported Database Modes
 
-### Key Components
-- **MCP Tools Layer**: Protocol interface and tool definitions
-- **Services Layer**: Business logic (StateService, GitManager)
-- **Repositories Layer**: Data access abstraction (Neo4j/SQLite)
-- **Utilities**: Security, logging, metrics, and validation modules
+### 1. Managed Neo4j (default)
+When `DB_MODE=neo4j` and no explicit Neo4j connection is provided, the server:
 
-For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
+- starts a **project-scoped Neo4j container automatically**;
+- stores persistent Neo4j data in `./.data/neo4j/`;
+- stores runtime metadata in `./.data/neo4j/runtime.json`;
+- reuses the same container and data on the next session in the same project;
+- connects without requiring `NEO4J_URI`, `NEO4J_USER`, or `NEO4J_PASSWORD` in MCP client configuration.
 
-## 🚀 Quick Start
+### 2. External Neo4j
+If you want to use an already existing Neo4j instance, set:
+
+- `DB_MODE=neo4j`
+- `NEO4J_BOOTSTRAP_MODE=external`
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
+
+### 3. SQLite
+If you want a self-contained local database without Neo4j, set:
+
+- `DB_MODE=sqlite`
+
+SQLite data is stored by default at:
+- `./data/state_manager.db`
+
+---
+
+## Installation
 
 ### Prerequisites
-- Python 3.10+
-- Docker & Docker Compose
+
+Required:
+- Python **3.10+**
+- `uv`
 - Git
-- Neo4j (optional, for graph database features)
 
-### Installation
+Required only for managed Neo4j mode:
+- Docker daemon running locally
+
+Install `uv` if necessary:
+
 ```bash
-# Clone the repository
-git clone https://github.com/apolosan/codebase_state_manager_mcp.git
-cd codebase_state_manager_mcp
-
-# Setup environment (uses uv if available)
-./scripts/setup.sh
-
-# Verify installation with tests
-./scripts/run_tests.sh
-```
-
-### Using uv (Recommended)
-```bash
-# Install uv if not present
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Setup with uv
-./scripts/setup.sh --sync
-
-# Run development server
-./scripts/dev.sh
 ```
 
-## 🛠️ Usage
+### Clone and install
 
-### Starting the MCP Server
 ```bash
-# Using the launcher script
-python run_mcp_server.py
+git clone <repository-url>
+cd codebase_state_manager_mcp
+./scripts/setup.sh
+```
 
-# Or directly via module
+Alternative direct install with uv:
+
+```bash
+uv sync --extra dev
+```
+
+Optional: activate the virtual environment created by `setup.sh`:
+
+```bash
+source .venv/bin/activate
+```
+
+---
+
+## Starting the Server
+
+### Recommended launcher
+
+```bash
+python run_mcp_server.py
+```
+
+### Alternative module entrypoint
+
+```bash
 python -m src.mcp_server
 ```
 
-### Docker Deployment
-```bash
-# Build and run with Docker Compose
-docker-compose up --build
+### Legacy compatibility launcher
 
-# Run test suite in Docker
-docker-compose -f docker-compose.test.yml up --build
-```
-
-### Available MCP Tools
-
-#### State Management
-- `genesis()` - Create initial state #0
-- `new_state_transition(prompt)` - Create next sequential state
-- `arbitrary_state_transition(target_state, prompt)` - Jump to any existing state
-- `get_current_state_info()` - Get details of current state
-- `get_state_info(state_number)` - Get details of specific state
-- `total_states()` - Count total states
-- `search_states(text)` - Search across state prompts
-
-#### Transition Tracking
-- `get_state_transitions(state_number)` - Get transitions from/to a state
-- `get_transition_info(transition_id)` - Get transition details
-- `track_transitions()` - Monitor recent transitions
-- `get_current_state_transitions()` - Get transitions for current state
-
-## 🔧 Configuration
-
-### Environment Variables
-Create a `.env` file based on `.env.example`:
+This file still exists for backward compatibility only:
 
 ```bash
-# Database Configuration
-DB_MODE=neo4j  # or sqlite
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
-
-# Docker Settings
-DOCKER_VOLUME_NAME=codebase_volume
-VOLUME_PATH=/path/to/volume
-
-# Security Settings
-RATE_LIMIT_REQUESTS=100
-RATE_LIMIT_WINDOW=60
+python init_neo4j_and_mcp.py
 ```
 
-### Database Modes
+Prefer `run_mcp_server.py` for all new integrations.
 
-#### Neo4j Mode (Recommended)
-```yaml
-# docker-compose.yml
-neo4j:
-  image: neo4j:5.24
-  environment:
-    NEO4J_AUTH: neo4j/password
-  ports:
-    - "7474:7474"  # Browser UI
-    - "7687:7687"  # Bolt protocol
+---
+
+## MCP Client Configuration
+
+### Minimal configuration: managed Neo4j
+
+This is the recommended MCP client configuration.
+
+```json
+{
+  "mcp": {
+    "codebase-state-manager": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--project",
+        "/absolute/path/to/codebase_state_manager_mcp",
+        "python",
+        "run_mcp_server.py"
+      ],
+      "enabled": true
+    }
+  }
+}
 ```
 
-#### SQLite Mode (Fallback)
-Automatically falls back to SQLite when Neo4j is unavailable. Data is stored in `data/state_manager.db`.
+No Neo4j credentials are required in the MCP client config for this mode.
 
-## 📊 Testing
+If `VOLUME_PATH` is omitted, the server automatically uses:
 
-### Test Suite
+```text
+/opt/codebase-state-manager/volumes/<current-project-dir-name>
+```
+
+This keeps the managed snapshot outside the project tree by default.
+
+### SQLite configuration
+
+```json
+{
+  "mcp": {
+    "codebase-state-manager": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--project",
+        "/absolute/path/to/codebase_state_manager_mcp",
+        "python",
+        "run_mcp_server.py"
+      ],
+      "environment": {
+        "DB_MODE": "sqlite"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+### External Neo4j configuration
+
+```json
+{
+  "mcp": {
+    "codebase-state-manager": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--project",
+        "/absolute/path/to/codebase_state_manager_mcp",
+        "python",
+        "run_mcp_server.py"
+      ],
+      "environment": {
+        "DB_MODE": "neo4j",
+        "NEO4J_BOOTSTRAP_MODE": "external",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your_password"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+---
+
+## Environment Variables
+
+The server reads `.env` automatically when present.
+
+### Common variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_MODE` | `neo4j` | `neo4j` or `sqlite` |
+| `LOG_LEVEL` | `INFO` | Logging level |
+| `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
+| `AUDIT_ENABLED` | `true` | Enable audit logging |
+| `VOLUME_PATH` | `/opt/codebase-state-manager/volumes/<current-project-dir-name>` | Managed workspace snapshot path |
+| `SQLITE_PATH` | `./data/state_manager.db` | SQLite database path |
+
+When `VOLUME_PATH` is not set, the server derives the final directory name from `Path.cwd().name`, so a project opened from `/workspace/my-app` defaults to `/opt/codebase-state-manager/volumes/my-app`.
+
+### Managed Neo4j variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEO4J_BOOTSTRAP_MODE` | inferred / `auto` | `auto` or `external` |
+| `NEO4J_AUTO_IMAGE` | `neo4j:5.24` | Docker image used for managed Neo4j |
+| `NEO4J_AUTO_HOME` | `./.data/neo4j` | Directory containing Neo4j runtime/data/logs |
+| `NEO4J_CONNECTION_TIMEOUT` | `90` | Neo4j connection timeout in seconds |
+
+### External Neo4j variables
+
+Used only when `NEO4J_BOOTSTRAP_MODE=external`.
+
+| Variable | Meaning |
+|---|---|
+| `NEO4J_URI` | Bolt connection URI |
+| `NEO4J_USER` | Neo4j username |
+| `NEO4J_PASSWORD` | Neo4j password |
+| `NEO4J_AUTH_ENABLED` | Optional explicit auth toggle |
+
+---
+
+## Exposed MCP Tools
+
+The actual tool names exposed by the FastMCP server are the `*_tool` names below.
+
+### State and lifecycle
+- `genesis_tool`
+- `start_genesis_tool`
+- `get_genesis_status_tool`
+- `get_genesis_result_tool`
+- `new_state_transition_tool`
+- `arbitrary_state_transition_tool`
+- `get_current_state_info_tool`
+- `get_state_info_tool`
+- `get_current_state_number_tool`
+- `total_states_tool`
+- `search_states_tool`
+
+### Transition inspection and rewards
+- `get_state_transitions_tool`
+- `get_transition_info_tool`
+- `track_transitions_tool`
+- `get_current_state_transitions_tool`
+- `get_rewarded_transitions_tool`
+- `set_transition_reward_tool`
+
+### Compact context
+- `get_current_state_compact_context_tool`
+- `get_compact_states_tool`
+
+### Volume repair and consistency
+- `fix_volume_path_tool`
+- `start_fix_volume_path_tool`
+- `get_fix_volume_path_status_tool`
+- `get_fix_volume_path_result_tool`
+- `check_consistency_tool`
+- `repair_consistency_tool`
+
+Total exposed MCP tools: **25**.
+
+---
+
+## State Representations
+
+Tools that return a `State` support:
+
+- `raw` — full legacy payload (default)
+- `compact` — only compact SCC-E view
+- `both` — both representations together
+
+Supported today on:
+- `genesis_tool`
+- `get_genesis_result_tool`
+- `new_state_transition_tool`
+- `arbitrary_state_transition_tool`
+- `get_current_state_info_tool`
+- `get_state_info_tool`
+
+Compact state payload fields:
+- `state_number`
+- `llm_context`
+- `compression_version`
+- `compacted_at`
+
+---
+
+## SCC-E Compact Context
+
+The project uses SCC-E to store compact, LLM-oriented state representations.
+
+Current behavior:
+- persisted automatically on `genesis()` and `new_state_transition()`;
+- generated on demand for legacy states that do not have compact context yet;
+- available through `get_current_state_compact_context_tool` without creating a new state;
+- queryable in persisted form through `get_compact_states_tool` for one state, an inclusive state range, or all states.
+
+The preview tool returns:
+- current state number;
+- compact payload;
+- vocabulary revision;
+- optional vocabulary map;
+- `persisted: false`.
+
+The persisted compact-state tool returns:
+- compact state payloads (`state_number`, `llm_context`, `compression_version`, `compacted_at`);
+- the reward from the earliest transition that produced each state, only when that reward is non-null.
+
+---
+
+## Persistence Parity: SQLite and Neo4j
+
+The project keeps the same logical persistence contract across both backends.
+
+### State fields persisted in both backends
+- `state_number`
+- `user_prompt`
+- `branch_name`
+- `git_diff_info`
+- `hash`
+- `created_at`
+- `file_hashes`
+- `file_hash_deltas`
+- `llm_context`
+- `compression_version`
+- `compacted_at`
+
+### Transition fields persisted in both backends
+- `transition_id`
+- `current_state`
+- `next_state`
+- `user_prompt`
+- `timestamp`
+- `reward`
+
+Implementation difference:
+- SQLite stores transition primary key as column `id`
+- Neo4j stores transition identifier as property `transition_id`
+
+At the model and service layers, both map to the same domain field: `Transition.transition_id`.
+
+---
+
+## Testing and Quality Commands
+
+### Full test suite
+
 ```bash
-# Run all tests
+python -m pytest tests -q
+```
+
+### Helper script
+
+```bash
 ./scripts/run_tests.sh
-
-# Specific test categories
-./scripts/run_tests.sh unit
-./scripts/run_tests.sh integration
-./scripts/run_tests.sh security
-./scripts/run_tests.sh e2e
-
-# With coverage report
-./scripts/run_tests.sh --coverage
 ```
 
-### Test Statistics
-- **440 Total Tests**: 100% passing
-- **90% Code Coverage**: Comprehensive test suite
-- **Security Tests**: Bandit, audit logging, rate limiting
-- **Performance Tests**: Stress testing and metrics validation
-- **Integration Tests**: Docker, Neo4j, SQLite integration
+### Static checks
 
-## 🔒 Security
-
-### Built-in Security Features
-- **Input Validation**: Sanitization of all user inputs
-- **Rate Limiting**: Token bucket algorithm per client
-- **Audit Logging**: Comprehensive operation tracking
-- **Content Hashing**: SHA256 verification of state integrity
-- **Container Isolation**: Docker-based git operations
-- **No Hardcoded Secrets**: Environment-based configuration only
-
-### Security Testing
 ```bash
-# Run security tests
-./scripts/run_tests.sh security
-
-# Bandit security scan
-uv run bandit -r src/
-
-# Custom security validation
-python -m pytest tests/security/ -v
+uv run mypy src/
+uv run bandit -r src/ -q
 ```
 
-## 📈 Performance
+### Development runner
 
-### Monitoring & Metrics
-- **PerformanceMonitor**: Tracks state transitions, DB queries, git operations
-- **MetricsCollector**: Aggregates counters and timing statistics
-- **@timed_operation**: Decorator for automatic performance profiling
-- **Structured Logging**: JSON output for easy parsing and analysis
-
-### Optimization Features
-- **Connection Pooling**: Efficient database connection management
-- **Lazy Loading**: On-demand resource initialization
-- **Caching**: Frequently accessed state information
-- **Async Operations**: Non-blocking I/O where applicable
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-### Development Setup
 ```bash
-# Install development dependencies
-./scripts/setup.sh
-
-# Activate pre-commit hooks
-chmod +x .git/hooks/pre-commit
-.git/hooks/pre-commit
-
-# Run development server
 ./scripts/dev.sh
 ```
 
-### Code Quality
-- **Type Checking**: mypy with strict settings
-- **Code Formatting**: Black and isort
-- **Linting**: Custom pre-commit hooks
-- **Documentation**: Comprehensive docstrings and API references
+---
 
-### Testing Guidelines
-1. Write tests for all new functionality
-2. Maintain 90%+ code coverage
-3. Include security tests for sensitive operations
-4. Add integration tests for database interactions
-5. Include performance tests for critical paths
+## Recommended Production Modes
 
-For comprehensive agent guidelines, see [AGENTS.md](AGENTS.md).
+### Recommended default
+Use **managed Neo4j** when:
+- Docker is available
+- you want graph persistence without extra manual setup
+- you want project-scoped persistence that survives across sessions
 
-## 📚 Documentation
+### Use SQLite when
+- Docker is not available
+- you want the simplest local setup
+- graph traversal features are not critical for your workflow
 
-### Key Documents
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design decisions
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines and processes
-- [CHANGELOG.md](CHANGELOG.md) - Version history and changes
-- [AGENTS.md](AGENTS.md) - Agent guidelines and operational requirements
-- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
-- [SETUP.md](SETUP.md) - Detailed setup instructions
+### Use external Neo4j when
+- you already operate a shared Neo4j service
+- you need your own backup, security, and infrastructure policies
 
-### Code Documentation
-- Comprehensive docstrings following Google style
-- Type hints for all function signatures
-- Example usage in docstrings
-- Error handling documentation
+---
 
-## 📄 License
+## Notes on Docker
 
-MIT License - see [LICENSE](LICENSE) file for details.
+The repository still contains Docker Compose files for local and test scenarios, but the recommended runtime path for the MCP server is now:
 
-## ⚠️ Disclaimer (Reiterated)
+- `run_mcp_server.py`
+- `python -m src.mcp_server`
 
-This software is experimental and should be used with extreme caution. Always:
+For managed Neo4j mode, the application itself handles Neo4j lifecycle automatically.
 
-1. **Backup your data** before use
-2. **Test in isolated environments** first
-3. **Monitor system resources** during operation
-4. **Review security configurations** regularly
-5. **Assume responsibility** for all usage consequences
+---
 
-The developers provide no warranties and accept no liability for any issues arising from the use of this software.
+## Additional Documentation
 
-**Note:** This is a Work in Progress (WIP) project. The software is in active development and may undergo significant changes, including breaking API modifications, feature additions, and architectural improvements. Users should expect ongoing evolution and should not consider this a stable production-ready solution at this stage.
+- [QUICKSTART.md](QUICKSTART.md) — minimal setup and MCP client configuration
+- [SETUP.md](SETUP.md) — detailed installation and configuration guide
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system architecture and storage mapping
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributor workflow and validation checklist
+- [CHANGELOG.md](CHANGELOG.md) — release history
+- [AGENTS.md](AGENTS.md) — repository operating instructions for coding agents
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

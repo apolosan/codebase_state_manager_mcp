@@ -4,6 +4,7 @@ Provides all the MCP server tools for managing codebase states.
 Includes rate limiting and audit logging for security.
 """
 
+import copy
 import time
 from typing import Any
 
@@ -15,6 +16,73 @@ from .volume_fix_jobs import VolumeFixJobManager
 
 logger = get_logger(__name__)
 _volume_operation_jobs = VolumeFixJobManager()
+VALID_STATE_REPRESENTATIONS = {"raw", "compact", "both"}
+
+
+def _state_meta(state_representation: str) -> dict[str, object]:
+    return {
+        "available_representations": ["raw", "compact", "both"],
+        "state_representation": state_representation,
+    }
+
+
+def _validate_state_representation(state_representation: str) -> dict[str, object] | None:
+    if state_representation in VALID_STATE_REPRESENTATIONS:
+        return None
+    return {
+        "success": False,
+        "message": (
+            "Invalid state_representation. Expected one of: raw, compact, both"
+        ),
+    }
+
+
+def _raw_state_payload(state: Any) -> dict[str, Any] | None:
+    if state is None:
+        return None
+    if isinstance(state, dict):
+        return dict(state)
+    if hasattr(state, "to_dict"):
+        raw_payload = state.to_dict()
+        if isinstance(raw_payload, dict):
+            return raw_payload
+    raise TypeError("State payload is not serializable")
+
+
+def _compact_state_payload_from_raw(raw_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if raw_payload is None:
+        return None
+    return {
+        "state_number": raw_payload.get("state_number"),
+        "llm_context": raw_payload.get("llm_context"),
+        "compression_version": raw_payload.get("compression_version"),
+        "compacted_at": raw_payload.get("compacted_at"),
+    }
+
+
+def _serialize_state_payload(state: Any, state_representation: str) -> dict[str, Any] | None:
+    raw_payload = _raw_state_payload(state)
+    compact_payload = _compact_state_payload_from_raw(raw_payload)
+
+    if state_representation == "raw":
+        return raw_payload
+    if state_representation == "compact":
+        return compact_payload
+    return {"raw": raw_payload, "compact": compact_payload}
+
+
+def _apply_state_representation_to_job(
+    job: dict[str, Any], state_representation: str
+) -> dict[str, Any]:
+    job_payload = copy.deepcopy(job)
+    result_payload = job_payload.get("result")
+    if not isinstance(result_payload, dict):
+        return job_payload
+    job_state = result_payload.get("state")
+    if job_state is None:
+        return job_payload
+    result_payload["state"] = _serialize_state_payload(job_state, state_representation)
+    return job_payload
 
 
 def _handle_rate_limit(client_id: str, endpoint: str) -> dict:
@@ -50,6 +118,7 @@ def genesis(
     state_service: StateService,
     project_path: str,
     volume_path: str,
+    state_representation: str = "raw",
     client_id: str = "default",
 ) -> dict:
     """Initialize the state machine for a project.
@@ -63,6 +132,10 @@ def genesis(
     Returns:
         Dict with success status, state, and message
     """
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "genesis")
     if rate_result:
         return rate_result
@@ -91,8 +164,9 @@ def genesis(
 
         return {
             "success": success,
-            "state": state.to_dict() if state else None,
+            "state": _serialize_state_payload(state, state_representation),
             "message": message,
+            "_meta": _state_meta(state_representation),
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -134,8 +208,16 @@ def get_genesis_status(job_id: str, client_id: str = "default") -> dict:
     return {"success": True, "job": job}
 
 
-def get_genesis_result(job_id: str, client_id: str = "default") -> dict:
+def get_genesis_result(
+    job_id: str,
+    state_representation: str = "raw",
+    client_id: str = "default",
+) -> dict:
     """Get the stable result for a background genesis job."""
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "get_genesis_result")
     if rate_result:
         return rate_result
@@ -143,7 +225,11 @@ def get_genesis_result(job_id: str, client_id: str = "default") -> dict:
     job = _volume_operation_jobs.get_result(job_id)
     if job is None:
         return {"success": False, "message": f"Genesis job not found: {job_id}"}
-    return {"success": True, "job": job}
+    return {
+        "success": True,
+        "job": _apply_state_representation_to_job(job, state_representation),
+        "_meta": _state_meta(state_representation),
+    }
 
 
 def fix_volume_path(
@@ -205,6 +291,8 @@ def get_fix_volume_path_result(job_id: str, client_id: str = "default") -> dict:
 def new_state_transition(
     state_service: StateService,
     user_prompt: str,
+    reward: float | None = None,
+    state_representation: str = "raw",
     client_id: str = "default",
 ) -> dict:
     """Perform a new state transition.
@@ -217,6 +305,10 @@ def new_state_transition(
     Returns:
         Dict with success status, state, and message
     """
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "new_state_transition")
     if rate_result:
         return rate_result
@@ -228,7 +320,7 @@ def new_state_transition(
         current_state = state_service.state_repo.get_current()
         from_state = current_state.state_number if current_state else -1
 
-        success, state, message = state_service.new_state_transition(user_prompt)
+        success, state, message = state_service.new_state_transition(user_prompt, reward=reward)
 
         to_state_num = state.state_number if state else -1
 
@@ -242,6 +334,7 @@ def new_state_transition(
             client_id=client_id,
             duration_ms=duration_ms,
             error_message=None if success else message,
+            metadata={"reward": reward} if reward is not None else {},
         )
 
         if success:
@@ -258,8 +351,9 @@ def new_state_transition(
 
         return {
             "success": success,
-            "state": state.to_dict() if state else None,
+            "state": _serialize_state_payload(state, state_representation),
             "message": message,
+            "_meta": _state_meta(state_representation),
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -271,6 +365,7 @@ def new_state_transition(
             client_id=client_id,
             duration_ms=duration_ms,
             error_message=str(e),
+            metadata={"reward": reward} if reward is not None else {},
         )
         logger.error(
             f"State transition failed: {e}",
@@ -283,6 +378,7 @@ def arbitrary_state_transition(
     state_service: StateService,
     next_state: int,
     user_prompt: str | None = None,
+    state_representation: str = "raw",
     client_id: str = "default",
 ) -> dict:
     """Perform an arbitrary state transition.
@@ -296,6 +392,10 @@ def arbitrary_state_transition(
     Returns:
         Dict with success status, state, and message
     """
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "arbitrary_state_transition")
     if rate_result:
         return rate_result
@@ -334,8 +434,9 @@ def arbitrary_state_transition(
 
         return {
             "success": success,
-            "state": state.to_dict() if state else None,
+            "state": _serialize_state_payload(state, state_representation),
             "message": message,
+            "_meta": _state_meta(state_representation),
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -367,7 +468,7 @@ def get_current_state_number(
     Returns:
         Dict with success status, state number, and message
     """
-    rate_result = _handle_rate_limit(client_id, "get_current_state_info")
+    rate_result = _handle_rate_limit(client_id, "get_current_state_number")
     if rate_result:
         return rate_result
 
@@ -377,6 +478,7 @@ def get_current_state_number(
 
 def get_current_state_info(
     state_service: StateService,
+    state_representation: str = "raw",
     client_id: str = "default",
 ) -> dict:
     """Get the current state information.
@@ -388,6 +490,10 @@ def get_current_state_info(
     Returns:
         Dict with success status, state, and message
     """
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "get_current_state_info")
     if rate_result:
         return rate_result
@@ -395,14 +501,16 @@ def get_current_state_info(
     state, message = state_service.get_current_state()
     return {
         "success": state is not None,
-        "state": state.to_dict() if state else None,
+        "state": _serialize_state_payload(state, state_representation),
         "message": message,
+        "_meta": _state_meta(state_representation),
     }
 
 
 def get_state_info(
     state_service: StateService,
     state: int,
+    state_representation: str = "raw",
     client_id: str = "default",
 ) -> dict:
     """Get information for a specific state.
@@ -415,6 +523,10 @@ def get_state_info(
     Returns:
         Dict with success status, state, and message
     """
+    invalid_representation = _validate_state_representation(state_representation)
+    if invalid_representation is not None:
+        return invalid_representation
+
     rate_result = _handle_rate_limit(client_id, "get_state_info")
     if rate_result:
         return rate_result
@@ -422,7 +534,55 @@ def get_state_info(
     state_obj, message = state_service.get_state_info(state)
     return {
         "success": state_obj is not None,
-        "state": state_obj.to_dict() if state_obj else None,
+        "state": _serialize_state_payload(state_obj, state_representation),
+        "message": message,
+        "_meta": _state_meta(state_representation),
+    }
+
+
+def get_current_state_compact_context(
+    state_service: StateService,
+    include_vocabulary: bool = False,
+    client_id: str = "default",
+) -> dict:
+    """Get a non-persisted compact preview of the current workspace."""
+    rate_result = _handle_rate_limit(client_id, "get_current_state_compact_context")
+    if rate_result:
+        return rate_result
+
+    preview_payload, message = state_service.get_current_state_compact_context(
+        include_vocabulary=include_vocabulary
+    )
+    if preview_payload is None:
+        return {"success": False, "message": message}
+    return {"success": True, **preview_payload, "message": message}
+
+
+def get_compact_states(
+    state_service: StateService,
+    state: int | None = None,
+    start_state: int | None = None,
+    end_state: int | None = None,
+    client_id: str = "default",
+) -> dict:
+    """Get compact state payloads for one state, an inclusive range, or all states.
+
+    Each compact state includes the reward from the earliest transition that produced it
+    when that reward is non-null.
+    """
+    rate_result = _handle_rate_limit(client_id, "get_compact_states")
+    if rate_result:
+        return rate_result
+
+    success, states, message = state_service.get_compact_states(
+        state=state,
+        start_state=start_state,
+        end_state=end_state,
+    )
+    return {
+        "success": success,
+        "states": states,
+        "count": len(states),
         "message": message,
     }
 
@@ -515,6 +675,88 @@ def get_transition_info(
 
     transition, message = state_service.get_transition_info(transition_id)
     return {"success": transition is not None, "transition": transition, "message": message}
+
+
+def get_rewarded_transitions(
+    state_service: StateService,
+    client_id: str = "default",
+) -> dict:
+    """Get transitions with non-null reward values."""
+    rate_result = _handle_rate_limit(client_id, "get_rewarded_transitions")
+    if rate_result:
+        return rate_result
+
+    transitions, message = state_service.get_rewarded_transitions()
+    return {"success": True, "transitions": transitions, "message": message}
+
+
+def set_transition_reward(
+    state_service: StateService,
+    reward: float | None,
+    transition_id: int | None = None,
+    current_state: int | None = None,
+    next_state: int | None = None,
+    client_id: str = "default",
+) -> dict:
+    """Set or update a transition reward."""
+    rate_result = _handle_rate_limit(client_id, "set_transition_reward")
+    if rate_result:
+        return rate_result
+
+    start_time = time.time()
+    audit_logger = get_audit_logger()
+
+    try:
+        success, transition, message = state_service.set_transition_reward(
+            reward=reward,
+            transition_id=transition_id,
+            current_state=current_state,
+            next_state=next_state,
+        )
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        resolved_transition_id = transition_id
+        previous_reward = None
+        if transition is not None:
+            if "transition_id" in transition:
+                resolved_transition_id = int(str(transition["transition_id"]))
+            raw_previous_reward = transition.get("previous_reward")
+            if isinstance(raw_previous_reward, (int, float)) and not isinstance(
+                raw_previous_reward, bool
+            ):
+                previous_reward = float(raw_previous_reward)
+
+        audit_logger.log_transition_reward_update(
+            success=success,
+            transition_id=resolved_transition_id,
+            current_state=current_state,
+            next_state=next_state,
+            previous_reward=previous_reward,
+            new_reward=reward,
+            client_id=client_id,
+            duration_ms=duration_ms,
+            error_message=None if success else message,
+        )
+
+        return {"success": success, "transition": transition, "message": message}
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        audit_logger.log_transition_reward_update(
+            success=False,
+            transition_id=transition_id,
+            current_state=current_state,
+            next_state=next_state,
+            previous_reward=None,
+            new_reward=reward,
+            client_id=client_id,
+            duration_ms=duration_ms,
+            error_message=str(e),
+        )
+        logger.error(
+            f"Transition reward update failed: {e}",
+            extra={"operation": "set_transition_reward", "client_id": client_id},
+        )
+        raise
 
 
 def track_transitions(

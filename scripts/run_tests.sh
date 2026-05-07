@@ -44,6 +44,14 @@ log_test() {
     echo -e "${CYAN}[TEST]${NC} $1"
 }
 
+check_uv_installed() {
+    if ! command -v uv &> /dev/null; then
+        log_error "uv não está instalado!"
+        log_info "Execute ./scripts/setup.sh primeiro"
+        exit 1
+    fi
+}
+
 show_help() {
     cat << EOF
 Codebase State Manager - Test Runner Script
@@ -270,25 +278,6 @@ main() {
 
     # Ensure Neo4j is stopped on exit
     trap stop_neo4j_after_tests EXIT
-
-    if [[ "$test_type" == "quick" ]]; then
-        run_quick_tests
-    else
-        run_tests "$test_type" "$@"
-    fi
-
-    local test_type="${1:-all}"
-    shift
-
-    check_uv_installed
-
-    # For integration tests, ensure Neo4j is running
-    if [[ "$test_type" == "integration" ]] || [[ "$test_type" == "all" ]]; then
-        if ! check_neo4j_available; then
-            start_neo4j_for_tests
-            export NEO4J_STARTED=true
-        fi
-    fi
 
     if [[ "$test_type" == "quick" ]]; then
         run_quick_tests

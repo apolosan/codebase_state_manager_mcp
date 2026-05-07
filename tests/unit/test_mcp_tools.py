@@ -11,20 +11,24 @@ from src.mcp_server.tools.mcp_tools import (
     _handle_rate_limit,
     arbitrary_state_transition,
     fix_volume_path,
-    get_genesis_result,
-    get_genesis_status,
+    get_compact_states,
+    get_current_state_compact_context,
     get_fix_volume_path_result,
     get_fix_volume_path_status,
+    get_genesis_result,
+    get_genesis_status,
     genesis,
     get_current_state_info,
     get_current_state_number,
+    get_rewarded_transitions,
     get_state_info,
     get_state_transitions,
     get_transition_info,
     new_state_transition,
     search_states,
-    start_genesis,
+    set_transition_reward,
     start_fix_volume_path,
+    start_genesis,
     total_states,
     track_transitions,
 )
@@ -70,8 +74,11 @@ class TestGenesis:
 
     def test_genesis_success(self):
         """Test successful genesis operation."""
+        mock_state = Mock()
+        mock_state.to_dict.return_value = {"state_number": 0}
+
         mock_state_service = Mock()
-        mock_state_service.genesis.return_value = (True, Mock(state_number=0), "Success")
+        mock_state_service.genesis.return_value = (True, mock_state, "Success")
 
         with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
             with patch("src.mcp_server.tools.mcp_tools.get_audit_logger") as mock_get_al:
@@ -221,7 +228,44 @@ class TestAsyncGenesis:
                             "message": "Genesis state created successfully",
                         },
                     },
+                    "_meta": {
+                        "available_representations": ["raw", "compact", "both"],
+                        "state_representation": "raw",
+                    },
                 }
+
+    def test_get_genesis_result_supports_compact_representation(self):
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools._volume_operation_jobs") as mock_jobs:
+                mock_rl.return_value = {}
+                mock_jobs.get_result.return_value = {
+                    "job_id": "job-genesis-123",
+                    "status": "completed",
+                    "result": {
+                        "success": True,
+                        "state": {
+                            "state_number": 0,
+                            "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+                            "compression_version": "scc-e:v1",
+                            "compacted_at": "2026-05-06T12:00:00+00:00",
+                        },
+                        "message": "Genesis state created successfully",
+                    },
+                }
+
+                result = get_genesis_result(
+                    job_id="job-genesis-123",
+                    state_representation="compact",
+                    client_id="client1",
+                )
+
+                assert result["job"]["result"]["state"] == {
+                    "state_number": 0,
+                    "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+                    "compression_version": "scc-e:v1",
+                    "compacted_at": "2026-05-06T12:00:00+00:00",
+                }
+                assert result["_meta"]["state_representation"] == "compact"
 
     def test_get_genesis_result_returns_not_found(self):
         with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
@@ -455,6 +499,44 @@ class TestNewStateTransition:
                     assert result["message"] == "Success"
                     mock_audit_logger.log_state_transition.assert_called_once()
 
+    def test_new_state_transition_forwards_reward_and_audit_metadata(self):
+        """Test reward is forwarded to service and audit metadata."""
+        mock_state = Mock()
+        mock_state.state_number = 1
+        mock_state.to_dict.return_value = {
+            "state_number": 1,
+            "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+            "compression_version": "scc-e:v1",
+            "compacted_at": "2026-05-06T12:00:00+00:00",
+        }
+
+        mock_state_service = Mock()
+        mock_state_service.state_repo.get_current.return_value = Mock(state_number=0)
+        mock_state_service.new_state_transition.return_value = (True, mock_state, "Success")
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            with patch("src.mcp_server.tools.mcp_tools.get_audit_logger") as mock_get_al:
+                with patch("src.mcp_server.tools.mcp_tools.get_logger"):
+                    mock_rl.return_value = {}
+                    mock_audit_logger = Mock()
+                    mock_get_al.return_value = mock_audit_logger
+
+                    result = new_state_transition(
+                        state_service=mock_state_service,
+                        user_prompt="Test prompt",
+                        reward=7.5,
+                        state_representation="both",
+                        client_id="client1",
+                    )
+
+                    assert result["success"] is True
+                    assert result["state"]["compact"]["compression_version"] == "scc-e:v1"
+                    mock_state_service.new_state_transition.assert_called_once_with(
+                        "Test prompt", reward=7.5
+                    )
+                    _, kwargs = mock_audit_logger.log_state_transition.call_args
+                    assert kwargs["metadata"] == {"reward": 7.5}
+
     def test_new_state_transition_rate_limited(self):
         """Test state transition when rate limited."""
         with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
@@ -512,6 +594,137 @@ class TestArbitraryStateTransition:
             mock_state_service.arbitrary_state_transition.assert_not_called()
 
 
+class TestCompactContextTools:
+    """Tests for compact context tools."""
+
+    def test_get_current_state_compact_context(self):
+        """Test get_current_state_compact_context function."""
+        mock_state_service = Mock()
+        mock_state_service.get_current_state_compact_context.return_value = (
+            {
+                "current_state": 7,
+                "preview": {
+                    "compression_version": "scc-e:v1",
+                    "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+                    "vocab_revision": 2,
+                    "persisted": False,
+                },
+            },
+            "Current workspace compact context generated",
+        )
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {}
+
+            result = get_current_state_compact_context(
+                state_service=mock_state_service,
+                include_vocabulary=True,
+                client_id="client1",
+            )
+
+            assert result["success"] is True
+            assert result["current_state"] == 7
+            assert result["preview"]["compression_version"] == "scc-e:v1"
+            mock_state_service.get_current_state_compact_context.assert_called_once_with(
+                include_vocabulary=True
+            )
+
+    def test_get_compact_states(self):
+        """Test get_compact_states function."""
+        mock_state_service = Mock()
+        mock_state_service.get_compact_states.return_value = (
+            True,
+            [
+                {
+                    "state_number": 1,
+                    "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+                    "compression_version": "scc-e:v1",
+                    "compacted_at": "2026-05-06T12:00:00+00:00",
+                },
+                {
+                    "state_number": 2,
+                    "llm_context": '{"v":"scc-e:v1","d":[{"p":0,"a":"M","s":10}],"h":[]}',
+                    "compression_version": "scc-e:v1",
+                    "compacted_at": "2026-05-06T12:05:00+00:00",
+                    "reward": 4.5,
+                },
+            ],
+            "Compact states 1-2 retrieved",
+        )
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {}
+
+            result = get_compact_states(
+                state_service=mock_state_service,
+                start_state=1,
+                end_state=2,
+                client_id="client1",
+            )
+
+            assert result["success"] is True
+            assert result["count"] == 2
+            assert "reward" not in result["states"][0]
+            assert result["states"][1]["reward"] == 4.5
+            mock_state_service.get_compact_states.assert_called_once_with(
+                state=None,
+                start_state=1,
+                end_state=2,
+            )
+
+
+class TestRewardTools:
+    """Tests for reward-related MCP tools."""
+
+    def test_get_rewarded_transitions(self):
+        """Test get_rewarded_transitions function."""
+        mock_state_service = Mock()
+        mock_state_service.get_rewarded_transitions.return_value = (
+            [{"transition_id": "1", "reward": 8.5}],
+            "Rewarded transitions retrieved: 1 total",
+        )
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {}
+
+            result = get_rewarded_transitions(state_service=mock_state_service, client_id="client1")
+
+            assert result["success"] is True
+            assert result["transitions"][0]["reward"] == 8.5
+
+    def test_set_transition_reward_success(self):
+        """Test set_transition_reward function."""
+        mock_state_service = Mock()
+        mock_state_service.set_transition_reward.return_value = (
+            True,
+            {
+                "transition_id": "1",
+                "previous_reward": 1.0,
+                "reward": 4.5,
+            },
+            "Transition reward updated",
+        )
+
+        with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
+            mock_rl.return_value = {}
+
+            result = set_transition_reward(
+                state_service=mock_state_service,
+                reward=4.5,
+                transition_id=1,
+                client_id="client1",
+            )
+
+            assert result["success"] is True
+            assert result["transition"]["reward"] == 4.5
+            mock_state_service.set_transition_reward.assert_called_once_with(
+                reward=4.5,
+                transition_id=1,
+                current_state=None,
+                next_state=None,
+            )
+
+
 class TestGetters:
     """Tests for getter functions."""
 
@@ -531,7 +744,12 @@ class TestGetters:
     def test_get_current_state_info(self):
         """Test get_current_state_info function."""
         mock_state = Mock()
-        mock_state.to_dict.return_value = {"state_number": 5}
+        mock_state.to_dict.return_value = {
+            "state_number": 5,
+            "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+            "compression_version": "scc-e:v1",
+            "compacted_at": "2026-05-06T12:00:00+00:00",
+        }
 
         mock_state_service = Mock()
         mock_state_service.get_current_state.return_value = (mock_state, "Found")
@@ -539,15 +757,25 @@ class TestGetters:
         with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
             mock_rl.return_value = {}
 
-            result = get_current_state_info(state_service=mock_state_service, client_id="client1")
+            result = get_current_state_info(
+                state_service=mock_state_service,
+                state_representation="compact",
+                client_id="client1",
+            )
 
             assert result["success"] is True
-            assert result["state"]["state_number"] == 5
+            assert result["state"]["compression_version"] == "scc-e:v1"
+            assert result["_meta"]["state_representation"] == "compact"
 
     def test_get_state_info(self):
         """Test get_state_info function."""
         mock_state = Mock()
-        mock_state.to_dict.return_value = {"state_number": 3}
+        mock_state.to_dict.return_value = {
+            "state_number": 3,
+            "llm_context": '{"v":"scc-e:v1","d":[],"h":[]}',
+            "compression_version": "scc-e:v1",
+            "compacted_at": "2026-05-06T12:00:00+00:00",
+        }
 
         mock_state_service = Mock()
         mock_state_service.get_state_info.return_value = (mock_state, "Found")
@@ -555,10 +783,16 @@ class TestGetters:
         with patch("src.mcp_server.tools.mcp_tools._handle_rate_limit") as mock_rl:
             mock_rl.return_value = {}
 
-            result = get_state_info(state_service=mock_state_service, state=3, client_id="client1")
+            result = get_state_info(
+                state_service=mock_state_service,
+                state=3,
+                state_representation="both",
+                client_id="client1",
+            )
 
             assert result["success"] is True
-            assert result["state"]["state_number"] == 3
+            assert result["state"]["raw"]["state_number"] == 3
+            assert result["state"]["compact"]["compression_version"] == "scc-e:v1"
 
     def test_total_states(self):
         """Test total_states function."""
@@ -648,12 +882,16 @@ class TestGetters:
         getters_with_args = [
             (get_current_state_number, {}),
             (get_current_state_info, {}),
+            (get_current_state_compact_context, {}),
+            (get_compact_states, {}),
             (get_state_info, {"state": 1}),
             (total_states, {}),
             (search_states, {"text": "test"}),
             (get_state_transitions, {"state": 1}),
             (get_transition_info, {"transition_id": str(uuid4())}),
             (track_transitions, {}),
+            (get_rewarded_transitions, {}),
+            (set_transition_reward, {"reward": 1.0, "transition_id": 1}),
         ]
 
         for func, args in getters_with_args:

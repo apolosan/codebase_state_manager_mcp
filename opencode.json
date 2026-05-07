@@ -147,30 +147,9 @@
         "--project",
         "/home/einar/Documentos/codebase_state_manager_mcp",
         "python",
-        "init_neo4j_and_mcp.py"
+        "run_mcp_server.py"
       ],
-      "environment": {
-        "DB_MODE": "sqlite",
-        "NEO4J_ENABLED": "false",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "password",
-        "NEO4J_CONNECTION_TIMEOUT": "90",
-        "LOG_LEVEL": "INFO",
-        "RATE_LIMIT_ENABLED": "false",
-        "AUDIT_ENABLED": "false",
-        "VOLUME_PATH": "/tmp/tool"
-      },
       "enabled": false
-    },
-    "MiniMax": {
-      "type": "local",
-      "command": ["uvx", "minimax-coding-plan-mcp", "-y"],
-      "environment": {
-        "MINIMAX_API_KEY": "{env:MINIMAX_API_KEY}",
-        "MINIMAX_API_HOST": "https://api.minimax.io"
-      },
-      "enabled": true
     }
   }
 }

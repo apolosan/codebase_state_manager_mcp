@@ -99,3 +99,19 @@ class TransitionRepository(ABC):
     @abstractmethod
     def count(self) -> int:
         pass
+
+    @abstractmethod
+    def delete(self, transition_id: int) -> bool:
+        pass
+
+    @abstractmethod
+    def get_rewarded(self) -> List[Transition]:
+        pass
+
+    @abstractmethod
+    def get_by_state_pair(self, current_state: int, next_state: int) -> List[Transition]:
+        pass
+
+    @abstractmethod
+    def update_reward(self, transition_id: int, reward: float | None) -> bool:
+        pass

@@ -239,6 +239,18 @@ class TestGitignoreParser:
         assert GitignoreParser._matches_pattern("some", "node_modules/", True) is False
         assert GitignoreParser._matches_pattern("some/deep", "node_modules/", True) is False
 
+    def test_matches_pattern_plain_component_name_matches_nested_paths(self):
+        """Test plain .gitignore names like 'node_modules' match nested path components."""
+        assert GitignoreParser._matches_pattern("frontend/node_modules", "node_modules", True) is True
+        assert (
+            GitignoreParser._matches_pattern(
+                "frontend/node_modules/react/package.json", "node_modules", False
+            )
+            is True
+        )
+        assert GitignoreParser._matches_pattern("frontend/.next", ".next", True) is True
+        assert GitignoreParser._matches_pattern("frontend/.next/cache/index", ".next", False) is True
+
 
 class TestIgnoreManager:
     """Test IgnoreManager functionality."""
@@ -257,6 +269,22 @@ class TestIgnoreManager:
             assert ignore_func("debug.log", False) is True
             assert ignore_func("node_modules", True) is True
             assert ignore_func("main.py", False) is False
+
+    def test_get_ignore_function_with_gitignore_plain_component_patterns_match_nested_paths(self):
+        """Test .gitignore plain names like node_modules/.next match nested directories."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir)
+            gitignore_path = project_path / ".gitignore"
+            gitignore_path.write_text("node_modules\n.next\n")
+
+            manager = IgnoreManager()
+            ignore_func = manager.get_ignore_function(project_path)
+
+            assert ignore_func("frontend/node_modules", True) is True
+            assert ignore_func("frontend/node_modules/react/package.json", False) is True
+            assert ignore_func("frontend/.next", True) is True
+            assert ignore_func("frontend/.next/cache/index", False) is True
+            assert ignore_func("frontend/src/app.ts", False) is False
 
     def test_get_ignore_function_nodejs_fallback(self):
         """Test fallback to Node.js patterns when no .gitignore."""

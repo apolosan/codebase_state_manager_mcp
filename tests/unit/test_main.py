@@ -80,6 +80,7 @@ class TestMainEntryPoint:
     def test_main_with_neo4j_mode(self, mock_settings, mock_repositories, capsys):
         """Test main function with Neo4j database mode."""
         mock_settings.db_mode = "neo4j"
+        mock_settings.neo4j_bootstrap_mode = "external"
         state_repo, transition_repo = mock_repositories
 
         with (
@@ -115,6 +116,46 @@ class TestMainEntryPoint:
                 "Neo4j" in str(call) or "Connected" in str(call)
                 for call in mock_logger.info.call_args_list
             )
+            mock_app_run.assert_called_once()
+
+    def test_main_auto_bootstraps_managed_neo4j_when_no_credentials_are_provided(
+        self, mock_settings, mock_repositories
+    ):
+        """Test auto-bootstrap path for managed Neo4j."""
+        mock_settings.db_mode = "neo4j"
+        mock_settings.neo4j_bootstrap_mode = "auto"
+        mock_settings.neo4j_auth_enabled = False
+        mock_settings.neo4j_uri = "bolt://localhost:7687"
+        state_repo, transition_repo = mock_repositories
+
+        with (
+            patch("src.mcp_server.config.get_settings", return_value=mock_settings),
+            patch("src.mcp_server.utils.logging.setup_logging"),
+            patch("src.mcp_server.utils.logging.get_logger") as mock_get_logger,
+            patch("src.mcp_server.utils.security.get_rate_limiter") as mock_get_rate_limiter,
+            patch("src.mcp_server.utils.audit.get_audit_logger") as mock_get_audit_logger,
+            patch(
+                "src.mcp_server.services.neo4j_bootstrap.prepare_neo4j_connection",
+                return_value=mock_settings,
+            ) as mock_prepare,
+            patch(
+                "src.mcp_server.repositories.neo4j_repository.create_neo4j_repositories",
+                return_value=mock_repositories,
+            ),
+            patch("src.mcp_server.services.git_manager.GitManager"),
+            patch("src.mcp_server.services.state_service.StateService"),
+            patch("src.mcp_server.tools.mcp_tools"),
+        ):
+            mock_get_logger.return_value = MagicMock()
+            mock_get_rate_limiter.return_value = MagicMock()
+            mock_get_audit_logger.return_value = MagicMock()
+
+            from src.mcp_server.__main__ import main
+
+            with patch("src.mcp_server.mcp_server.app.run") as mock_app_run:
+                main()
+
+            mock_prepare.assert_called()
             mock_app_run.assert_called_once()
 
     def test_main_disables_rate_limiting_when_disabled(self, mock_settings, mock_repositories):

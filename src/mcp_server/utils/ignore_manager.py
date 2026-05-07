@@ -190,13 +190,37 @@ class GitignoreParser:
             pattern = pattern[:-1]
 
         # Handle patterns starting with /
-        if pattern.startswith("/"):
+        is_rooted_pattern = pattern.startswith("/")
+        if is_rooted_pattern:
             # Rooted patterns only match from root
             pattern = pattern[1:]
             if "/" in path:
                 return False
 
-        # Use fnmatch for glob matching
+        has_glob = any(char in pattern for char in "*?[")
+        path_parts = path.split("/")
+
+        if not has_glob:
+            if is_rooted_pattern:
+                if is_directory_pattern:
+                    return path == pattern and is_dir
+                return path == pattern
+
+            if "/" in pattern:
+                if is_directory_pattern:
+                    if path == pattern:
+                        return is_dir
+                    return path.startswith(f"{pattern}/")
+                return path == pattern
+
+            if pattern not in path_parts:
+                return False
+
+            if is_directory_pattern and not is_dir and path == pattern:
+                return False
+            return True
+
+        # Use fnmatch for glob matching only when the pattern actually contains glob syntax.
         import re
 
         # Convert glob pattern to regex
@@ -216,7 +240,6 @@ class GitignoreParser:
 
         # For directory patterns, check if pattern appears as directory component anywhere in path
         if is_directory_pattern:
-            path_parts = path.split("/")
             pattern_name = pattern  # pattern already has / removed
             if pattern_name in path_parts:
                 # If the pattern appears as a directory component, ignore it

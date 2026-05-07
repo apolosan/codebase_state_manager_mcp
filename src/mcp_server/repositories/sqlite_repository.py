@@ -1,15 +1,16 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine, func
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from ..utils.hash import generate_state_hash
 from ..utils.retry import retry_on_lock
+from ..utils.schema_upgrade import ensure_schema_columns
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,14 @@ from ..repositories.abstract_repositories import StateRepository, TransitionRepo
 Base = declarative_base()
 
 
+def _ensure_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 class StateModel(Base):
     __tablename__ = "states"
     state_number = Column(Integer, primary_key=True)
@@ -33,6 +42,9 @@ class StateModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     file_hashes = Column(Text, nullable=True)
     file_hash_deltas = Column(Text, nullable=True)
+    llm_context = Column(Text, nullable=True)
+    compression_version = Column(String(32), nullable=True)
+    compacted_at = Column(DateTime, nullable=True)
 
 
 class MetadataModel(Base):
@@ -48,17 +60,52 @@ class TransitionModel(Base):
     next_state = Column(Integer, nullable=False)
     user_prompt = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    reward = Column(Float, nullable=True)
 
 
 class SQLiteStateRepository(StateRepository):
-    def __init__(self, session_factory: sessionmaker, settings: Settings) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        settings: Settings,
+        engine=None,
+    ) -> None:
         self.session_factory = session_factory
         self.settings = settings
-        self._engine = None
+        self._engine = engine
+        if self._engine is not None:
+            ensure_schema_columns(self._engine)
 
     def close(self) -> None:
         """Close the database connection."""
         pass
+
+    def _build_state(self, state_model: StateModel) -> State:
+        file_hashes = {}
+        if state_model.file_hashes:
+            try:
+                file_hashes = json.loads(state_model.file_hashes)
+            except json.JSONDecodeError:
+                file_hashes = {}
+        file_hash_deltas = {}
+        if state_model.file_hash_deltas:
+            try:
+                file_hash_deltas = json.loads(state_model.file_hash_deltas)
+            except json.JSONDecodeError:
+                file_hash_deltas = {}
+        return State(
+            state_number=state_model.state_number,
+            user_prompt=state_model.user_prompt,
+            branch_name=state_model.branch_name,
+            git_diff_info=state_model.git_diff_info,
+            hash=state_model.hash,
+            created_at=_ensure_utc(state_model.created_at),
+            file_hashes=file_hashes if file_hashes else None,
+            file_hash_deltas=file_hash_deltas,
+            llm_context=state_model.llm_context,
+            compression_version=state_model.compression_version,
+            compacted_at=_ensure_utc(state_model.compacted_at),
+        )
 
     def create(self, state: State) -> bool:
         session = self.session_factory()
@@ -79,6 +126,9 @@ class SQLiteStateRepository(StateRepository):
                 created_at=state.created_at,
                 file_hashes=file_hashes_json,
                 file_hash_deltas=file_hash_deltas_json,
+                llm_context=state.llm_context,
+                compression_version=state.compression_version,
+                compacted_at=state.compacted_at,
             )
             session.add(state_model)
             session.commit()
@@ -94,28 +144,7 @@ class SQLiteStateRepository(StateRepository):
         try:
             state_model = session.query(StateModel).filter_by(state_number=state_number).first()
             if state_model:
-                file_hashes = {}
-                if state_model.file_hashes:
-                    try:
-                        file_hashes = json.loads(state_model.file_hashes)
-                    except json.JSONDecodeError:
-                        file_hashes = {}
-                file_hash_deltas = {}
-                if state_model.file_hash_deltas:
-                    try:
-                        file_hash_deltas = json.loads(state_model.file_hash_deltas)
-                    except json.JSONDecodeError:
-                        file_hash_deltas = {}
-                return State(
-                    state_number=state_model.state_number,
-                    user_prompt=state_model.user_prompt,
-                    branch_name=state_model.branch_name,
-                    git_diff_info=state_model.git_diff_info,
-                    hash=state_model.hash,
-                    created_at=state_model.created_at,
-                    file_hashes=file_hashes if file_hashes else None,
-                    file_hash_deltas=file_hash_deltas,
-                )
+                return self._build_state(state_model)
             return None
         finally:
             session.close()
@@ -130,28 +159,7 @@ class SQLiteStateRepository(StateRepository):
 
             state_model = session.query(StateModel).order_by(StateModel.state_number.desc()).first()
             if state_model:
-                file_hashes = {}
-                if state_model.file_hashes:
-                    try:
-                        file_hashes = json.loads(state_model.file_hashes)
-                    except json.JSONDecodeError:
-                        file_hashes = {}
-                file_hash_deltas = {}
-                if state_model.file_hash_deltas:
-                    try:
-                        file_hash_deltas = json.loads(state_model.file_hash_deltas)
-                    except json.JSONDecodeError:
-                        file_hash_deltas = {}
-                return State(
-                    state_number=state_model.state_number,
-                    user_prompt=state_model.user_prompt,
-                    branch_name=state_model.branch_name,
-                    git_diff_info=state_model.git_diff_info,
-                    hash=state_model.hash,
-                    created_at=state_model.created_at,
-                    file_hashes=file_hashes if file_hashes else None,
-                    file_hash_deltas=file_hash_deltas,
-                )
+                return self._build_state(state_model)
             return None
         finally:
             session.close()
@@ -160,33 +168,7 @@ class SQLiteStateRepository(StateRepository):
         session = self.session_factory()
         try:
             state_models = session.query(StateModel).order_by(StateModel.state_number).all()
-            states = []
-            for sm in state_models:
-                file_hashes = {}
-                if sm.file_hashes:
-                    try:
-                        file_hashes = json.loads(sm.file_hashes)
-                    except json.JSONDecodeError:
-                        file_hashes = {}
-                file_hash_deltas = {}
-                if sm.file_hash_deltas:
-                    try:
-                        file_hash_deltas = json.loads(sm.file_hash_deltas)
-                    except json.JSONDecodeError:
-                        file_hash_deltas = {}
-                states.append(
-                    State(
-                        state_number=sm.state_number,
-                        user_prompt=sm.user_prompt,
-                        branch_name=sm.branch_name,
-                        git_diff_info=sm.git_diff_info,
-                        hash=sm.hash,
-                        created_at=sm.created_at,
-                        file_hashes=file_hashes if file_hashes else None,
-                        file_hash_deltas=file_hash_deltas,
-                    )
-                )
-            return states
+            return [self._build_state(state_model) for state_model in state_models]
         finally:
             session.close()
 
@@ -277,6 +259,9 @@ class SQLiteStateRepository(StateRepository):
                 created_at=state.created_at,
                 file_hashes=file_hashes_json,
                 file_hash_deltas=file_hash_deltas_json,
+                llm_context=state.llm_context,
+                compression_version=state.compression_version,
+                compacted_at=state.compacted_at,
             )
             session.add(state_model)
             session.commit()
@@ -387,6 +372,16 @@ class SQLiteTransitionRepository(TransitionRepository):
         """Close the database connection."""
         pass
 
+    def _build_transition(self, transition_model: TransitionModel) -> Transition:
+        return Transition(
+            transition_id=transition_model.id,
+            current_state=transition_model.current_state,
+            next_state=transition_model.next_state,
+            user_prompt=transition_model.user_prompt,
+            timestamp=_ensure_utc(transition_model.timestamp),
+            reward=transition_model.reward,
+        )
+
     def create(self, transition: Transition) -> bool:
         session = self.session_factory()
         try:
@@ -399,6 +394,7 @@ class SQLiteTransitionRepository(TransitionRepository):
                 next_state=transition.next_state,
                 user_prompt=transition.user_prompt,
                 timestamp=transition.timestamp,
+                reward=transition.reward,
             )
             session.add(transition_model)
             session.commit()
@@ -447,6 +443,7 @@ class SQLiteTransitionRepository(TransitionRepository):
                 next_state=transition.next_state,
                 user_prompt=transition.user_prompt,
                 timestamp=transition.timestamp,
+                reward=transition.reward,
             )
             session.add(transition_model)
             session.commit()
@@ -484,13 +481,7 @@ class SQLiteTransitionRepository(TransitionRepository):
         try:
             tm = session.query(TransitionModel).filter_by(id=transition_id).first()
             if tm:
-                return Transition(
-                    transition_id=tm.id,
-                    current_state=tm.current_state,
-                    next_state=tm.next_state,
-                    user_prompt=tm.user_prompt,
-                    timestamp=tm.timestamp,
-                )
+                return self._build_transition(tm)
             return None
         finally:
             session.close()
@@ -498,17 +489,13 @@ class SQLiteTransitionRepository(TransitionRepository):
     def get_by_state(self, state_number: int) -> List[Transition]:
         session = self.session_factory()
         try:
-            tm_models = session.query(TransitionModel).filter_by(current_state=state_number).all()
-            return [
-                Transition(
-                    transition_id=tm.id,
-                    current_state=tm.current_state,
-                    next_state=tm.next_state,
-                    user_prompt=tm.user_prompt,
-                    timestamp=tm.timestamp,
-                )
-                for tm in tm_models
-            ]
+            tm_models = (
+                session.query(TransitionModel)
+                .filter_by(current_state=state_number)
+                .order_by(TransitionModel.id)
+                .all()
+            )
+            return [self._build_transition(tm) for tm in tm_models]
         finally:
             session.close()
 
@@ -521,16 +508,7 @@ class SQLiteTransitionRepository(TransitionRepository):
                 .limit(limit)
                 .all()
             )
-            return [
-                Transition(
-                    transition_id=tm.id,
-                    current_state=tm.current_state,
-                    next_state=tm.next_state,
-                    user_prompt=tm.user_prompt,
-                    timestamp=tm.timestamp,
-                )
-                for tm in tm_models
-            ]
+            return [self._build_transition(tm) for tm in tm_models]
         finally:
             session.close()
 
@@ -538,6 +516,60 @@ class SQLiteTransitionRepository(TransitionRepository):
         session = self.session_factory()
         try:
             return session.query(TransitionModel).count()
+        finally:
+            session.close()
+
+    def delete(self, transition_id: int) -> bool:
+        session = self.session_factory()
+        try:
+            deleted = session.query(TransitionModel).filter_by(id=transition_id).delete()
+            session.commit()
+            return deleted > 0
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    def get_rewarded(self) -> List[Transition]:
+        session = self.session_factory()
+        try:
+            tm_models = (
+                session.query(TransitionModel)
+                .filter(TransitionModel.reward.isnot(None))
+                .order_by(TransitionModel.id)
+                .all()
+            )
+            return [self._build_transition(tm) for tm in tm_models]
+        finally:
+            session.close()
+
+    def get_by_state_pair(self, current_state: int, next_state: int) -> List[Transition]:
+        session = self.session_factory()
+        try:
+            tm_models = (
+                session.query(TransitionModel)
+                .filter_by(current_state=current_state, next_state=next_state)
+                .order_by(TransitionModel.id)
+                .all()
+            )
+            return [self._build_transition(tm) for tm in tm_models]
+        finally:
+            session.close()
+
+    def update_reward(self, transition_id: int, reward: Optional[float]) -> bool:
+        session = self.session_factory()
+        try:
+            updated = (
+                session.query(TransitionModel)
+                .filter_by(id=transition_id)
+                .update({"reward": reward})
+            )
+            session.commit()
+            return updated > 0
+        except Exception:
+            session.rollback()
+            return False
         finally:
             session.close()
 
@@ -560,6 +592,6 @@ def create_sqlite_repositories(
 ) -> tuple[SQLiteStateRepository, SQLiteTransitionRepository]:
     engine = create_sqlite_engine(path)
     session_factory = sessionmaker(bind=engine)
-    return SQLiteStateRepository(session_factory, settings), SQLiteTransitionRepository(
+    return SQLiteStateRepository(session_factory, settings, engine=engine), SQLiteTransitionRepository(
         session_factory, settings
     )

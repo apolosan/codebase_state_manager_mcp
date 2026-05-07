@@ -22,6 +22,7 @@ class AuditEventType(str, Enum):
     STATE_ACCESS = "STATE_ACCESS"
     SEARCH = "SEARCH"
     CONFIG_CHANGE = "CONFIG_CHANGE"
+    TRANSITION_REWARD_UPDATE = "TRANSITION_REWARD_UPDATE"
     SECURITY_VIOLATION = "SECURITY_VIOLATION"
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     VALIDATION_FAILURE = "VALIDATION_FAILURE"
@@ -91,6 +92,7 @@ class AuditLogger:
         AuditEventType.STATE_TRANSITION,
         AuditEventType.ARBITRARY_TRANSITION,
         AuditEventType.GENESIS,
+        AuditEventType.TRANSITION_REWARD_UPDATE,
         AuditEventType.SECURITY_VIOLATION,
         AuditEventType.RATE_LIMIT_EXCEEDED,
         AuditEventType.VALIDATION_FAILURE,
@@ -244,6 +246,38 @@ class AuditLogger:
             error_message=error_message,
             details={"project_path": project_path} if project_path else {},
             metadata=metadata or {},
+        )
+        self.log_event(event)
+
+    def log_transition_reward_update(
+        self,
+        success: bool,
+        transition_id: int | None,
+        current_state: int | None,
+        next_state: int | None,
+        previous_reward: float | None,
+        new_reward: float | None,
+        client_id: str = "system",
+        session_id: str | None = None,
+        duration_ms: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Log a transition reward update event."""
+        event = AuditEvent(
+            event_type=AuditEventType.TRANSITION_REWARD_UPDATE,
+            outcome=AuditOutcome.SUCCESS if success else AuditOutcome.FAILURE,
+            operation="transition_reward_update",
+            client_id=client_id,
+            session_id=session_id,
+            duration_ms=duration_ms,
+            error_message=error_message,
+            metadata={
+                "transition_id": transition_id,
+                "current_state": current_state,
+                "next_state": next_state,
+                "previous_reward": previous_reward,
+                "new_reward": new_reward,
+            },
         )
         self.log_event(event)
 

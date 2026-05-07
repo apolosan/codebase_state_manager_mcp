@@ -1,3 +1,5 @@
+import json
+import math
 import re
 from pathlib import Path
 from typing import Optional
@@ -340,3 +342,121 @@ def validate_volume_path(volume_path: str) -> Path:
         raise ValidationError(f"Volume path inválido: {e}")
 
     return resolved
+
+
+def validate_reward(value: float | None) -> float | None:
+    """Validate a transition reward value.
+
+    Args:
+        value: Reward to validate.
+
+    Returns:
+        The validated reward or None.
+
+    Raises:
+        ValidationError: If the reward is invalid.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError("Reward deve ser numérico ou null")
+
+    reward = float(value)
+    if math.isnan(reward) or math.isinf(reward):
+        raise ValidationError("Reward deve ser um número finito")
+
+    if reward < -10 or reward > 10:
+        raise ValidationError("Reward deve estar no intervalo [-10, 10]")
+
+    return reward
+
+
+def _validate_compact_diff_item(item: object) -> None:
+    if not isinstance(item, dict):
+        raise ValidationError("Cada item de d deve ser um objeto JSON")
+
+    required_keys = {"p", "a", "s"}
+    if not required_keys.issubset(item.keys()):
+        raise ValidationError("Cada item de d deve conter p, a e s")
+
+    path_id = item["p"]
+    action = item["a"]
+    size = item["s"]
+
+    if isinstance(path_id, bool) or not isinstance(path_id, int):
+        raise ValidationError("Campo d[].p deve ser inteiro")
+    if not isinstance(action, str) or action not in {"A", "M", "D"}:
+        raise ValidationError("Campo d[].a deve ser um de A, M ou D")
+    if isinstance(size, bool) or not isinstance(size, int):
+        raise ValidationError("Campo d[].s deve ser inteiro")
+
+
+
+def _validate_compact_hash_item(item: object) -> None:
+    if not isinstance(item, dict):
+        raise ValidationError("Cada item de h deve ser um objeto JSON")
+
+    required_keys = {"i", "h"}
+    if not required_keys.issubset(item.keys()):
+        raise ValidationError("Cada item de h deve conter i e h")
+
+    hash_id = item["i"]
+    hash_value = item["h"]
+
+    if isinstance(hash_id, bool) or not isinstance(hash_id, int):
+        raise ValidationError("Campo h[].i deve ser inteiro")
+    if not isinstance(hash_value, str) or not hash_value:
+        raise ValidationError("Campo h[].h deve ser string não vazia")
+
+
+
+def validate_llm_context(value: str | None) -> str | None:
+    """Validate an SCC-E compact state payload.
+
+    Args:
+        value: JSON string payload or None.
+
+    Returns:
+        The original payload when valid, or None.
+
+    Raises:
+        ValidationError: If the payload is invalid.
+    """
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValidationError("llm_context deve ser uma string JSON ou null")
+
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"llm_context deve ser JSON válido: {exc}")
+
+    if not isinstance(payload, dict):
+        raise ValidationError("llm_context deve ser um objeto JSON")
+
+    expected_keys = {"v", "d", "h"}
+    if set(payload.keys()) != expected_keys:
+        raise ValidationError("llm_context deve conter exatamente as chaves v, d e h")
+
+    version = payload.get("v")
+    if version != "scc-e:v1":
+        raise ValidationError("llm_context deve usar a versão scc-e:v1")
+
+    diffs = payload.get("d")
+    hashes = payload.get("h")
+
+    if not isinstance(diffs, list):
+        raise ValidationError("llm_context.d deve ser uma lista")
+    if not isinstance(hashes, list):
+        raise ValidationError("llm_context.h deve ser uma lista")
+
+    for diff_item in diffs:
+        _validate_compact_diff_item(diff_item)
+
+    for hash_item in hashes:
+        _validate_compact_hash_item(hash_item)
+
+    return value

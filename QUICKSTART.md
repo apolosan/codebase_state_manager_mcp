@@ -1,36 +1,70 @@
-# 🚀 Codebase State Manager MCP - Quick Start
+# Quick Start
 
-## ⚡ Setup Rápido (2 minutos)
+This guide shows the shortest correct path to run the project today.
 
-### 1. Pré-requisitos
-- Docker instalado e rodando
-- Opencode configurado
+Current validated project version: **0.2.1**.
 
-### 2. Configuração Automática
-O `opencode.json` já está configurado para:
-- ✅ Gerenciar container Neo4j automaticamente
-- ✅ Iniciar servidor MCP automaticamente
-- ✅ Reutilizar containers existentes
+---
 
-### 3. Como Usar
-1. **Reinicie o Opencode**
-2. **Aguarde 30-60 segundos** (Neo4j inicializando)
-3. **Ferramentas estarão disponíveis automaticamente**
+## 1. Prerequisites
 
-## 🛠️ Ferramentas Disponíveis
+Required:
+- Python 3.10+
+- `uv`
+- Git
 
-| Ferramenta | Descrição |
-|------------|-----------|
-| `genesis_tool` | Inicializar máquina de estados |
-| `get_current_state_number_tool` | Obter estado atual |
-| `total_states_tool` | Contar estados totais |
-| `new_state_transition_tool` | Criar nova transição |
-| `get_current_state_info_tool` | Info completa do estado atual |
-| `search_states_tool` | Buscar estados por texto |
+Required only for the default managed Neo4j mode:
+- Docker running locally
 
-## 🔧 Configuração Completa no opencode.json
+Install `uv` if needed:
 
-O arquivo `opencode.json` já está configurado automaticamente:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+---
+
+## 2. Install
+
+```bash
+git clone <repository-url>
+cd codebase_state_manager_mcp
+./scripts/setup.sh
+```
+
+Alternative:
+
+```bash
+uv sync --extra dev
+```
+
+---
+
+## 3. Start the server locally
+
+Recommended launcher:
+
+```bash
+python run_mcp_server.py
+```
+
+Alternative:
+
+```bash
+python -m src.mcp_server
+```
+
+Legacy compatibility alias still exists, but is deprecated:
+
+```bash
+python init_neo4j_and_mcp.py
+```
+
+---
+
+## 4. Minimal MCP client configuration
+
+### Default: managed Neo4j
 
 ```json
 {
@@ -38,60 +72,88 @@ O arquivo `opencode.json` já está configurado automaticamente:
     "codebase-state-manager": {
       "type": "local",
       "command": [
-        "/root/.local/bin/uv",
+        "uv",
         "run",
         "--project",
-        "/user/path/codebase_state_manager_mcp",
+        "/absolute/path/to/codebase_state_manager_mcp",
         "python",
-        "init_neo4j_and_mcp.py"
+        "run_mcp_server.py"
       ],
-      "env": {
-        "DB_MODE": "neo4j",
-        "NEO4J_ENABLED": "true",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "password",
-        "LOG_LEVEL": "INFO",
-        "RATE_LIMIT_ENABLED": "true",
-        "AUDIT_ENABLED": "true"
-      },
       "enabled": true
     }
   }
 }
 ```
 
-### Configurações Avançadas (Opcional)
+This mode does **not** require:
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
 
-#### Alterar Credenciais Neo4j
+---
+
+## 5. Optional runtime modes
+
+### SQLite
+
 ```json
-"env": {
-  "NEO4J_PASSWORD": "sua_senha",
-  "NEO4J_USER": "seu_usuario"
+{
+  "env": {
+    "DB_MODE": "sqlite"
+  }
 }
 ```
 
-#### Usar SQLite (Sem Docker)
+### External Neo4j
+
 ```json
-"env": {
-  "DB_MODE": "sqlite",
-  "NEO4J_ENABLED": "false"
+{
+  "env": {
+    "DB_MODE": "neo4j",
+    "NEO4J_BOOTSTRAP_MODE": "external",
+    "NEO4J_URI": "bolt://localhost:7687",
+    "NEO4J_USER": "neo4j",
+    "NEO4J_PASSWORD": "your_password"
+  }
 }
 ```
 
-## 📊 Verificação
+---
+
+## 6. Verify the setup
+
+### Managed Neo4j mode
 
 ```bash
-# Container Neo4j
-docker ps | grep mcp-neo4j-server
-
-# Volumes persistentes
-docker volume ls | grep mcp_neo4j
-
-# Logs
-docker logs mcp-neo4j-server
+docker ps | grep codebase-state-manager-neo4j
+ls ./.data/neo4j/
 ```
 
-## 🎯 Pronto!
-**Reinicie o Opencode e use as ferramentas MCP automaticamente!** 🎉</content>
-<parameter name="filePath">QUICKSTART.md
+### Full validation
+
+```bash
+python -m pytest tests -q
+uv run mypy src/
+uv run bandit -r src/ -q
+```
+
+Latest validation result on the current codebase:
+- `461 passed`
+- `mypy` passing
+- `bandit` clean
+
+---
+
+## 7. Main exposed MCP tools
+
+- `genesis_tool`
+- `new_state_transition_tool`
+- `get_current_state_info_tool`
+- `get_current_state_compact_context_tool`
+- `get_rewarded_transitions_tool`
+- `set_transition_reward_tool`
+- `fix_volume_path_tool`
+- `check_consistency_tool`
+- `repair_consistency_tool`
+
+For the full list and exact semantics, see [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).

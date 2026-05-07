@@ -36,6 +36,7 @@ class TestCWE78_OSCommandInjection:
         def __init__(self):
             self.states = {}
             self._current_state = None
+            self.metadata = {}
 
         def create(self, state):
             self.states[state.state_number] = state
@@ -53,6 +54,16 @@ class TestCWE78_OSCommandInjection:
 
         def count(self):
             return len(self.states)
+
+        def get_all(self):
+            return [self.states[k] for k in sorted(self.states.keys())]
+
+        def get_metadata(self, key):
+            return self.metadata.get(key)
+
+        def set_metadata(self, key, value):
+            self.metadata[key] = value
+            return True
 
         def create_next(self, state):
             # Find next sequential number
@@ -92,6 +103,11 @@ class TestCWE78_OSCommandInjection:
         trans_repo = self.MockTransitionRepository()
         git_manager = MagicMock()
         git_manager.get_diff.return_value = ""
+        git_manager.compute_changes_since_last_state.return_value = (
+            '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
+            {},
+        )
+        git_manager.get_directory_hashes.return_value = {}
 
         settings = Settings(
             db_mode="sqlite",

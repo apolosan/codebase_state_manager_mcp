@@ -1,92 +1,58 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.1] - 2026-05-07
+
+### Added
+- Managed Neo4j bootstrap per project, with persistent runtime/data under `./.data/neo4j/`
+- `neo4j_bootstrap_mode = auto | external`
+- SCC-E codec module (`src/mcp_server/services/scc_codec.py`)
+- Automatic persistence of compact state context on `genesis()` and `new_state_transition()`
+- On-demand compact enrichment for legacy states without `llm_context`
+- `get_current_state_compact_context_tool`
+- `get_compact_states_tool` for single-state, range, and all-state compact retrieval with generating-transition reward when non-null
+- `get_rewarded_transitions_tool`
+- `set_transition_reward_tool`
+- `state_representation = raw | compact | both` support on state-returning tools
+- Formal parity tests for SQLite and Neo4j persistence fields
+- Launcher configuration tests covering canonical and legacy launchers
+
+### Changed
+- Canonical launcher is now `run_mcp_server.py`
+- `init_neo4j_and_mcp.py` is now a deprecated compatibility alias
+- MCP client examples now use `run_mcp_server.py`
+- README, QUICKSTART, SETUP, CONTRIBUTING, and ARCHITECTURE documentation were rewritten to reflect the current codebase and runtime behavior
+- Project version bumped to `0.2.1`
+
+### Fixed
+- `.gitignore` plain component patterns like `node_modules` and `.next` now match nested paths during managed snapshot copy/sync, preventing oversized volumes and slow transitions in multi-package projects
+- Default managed snapshot fallback now uses `/opt/codebase-state-manager/volumes/<current-project-dir-name>` when `VOLUME_PATH` is unset, keeping snapshots outside the project tree by default
+- `genesis()` now resolves source and volume paths before the recursion guard check, so relative volume paths inside the project are rejected correctly
+- Neo4j current-state lookup now correctly returns state `0` when genesis is the highest existing state and no explicit metadata pointer exists
+- SQLite and Neo4j persistence contracts were aligned and revalidated for:
+  - compact state fields (`llm_context`, `compression_version`, `compacted_at`)
+  - rewarded transitions (`reward`)
+- `scripts/run_tests.sh` control flow corrected
+- `scripts/dev.sh` logging helper completed
+- mypy errors introduced during SCC-E and managed Neo4j work were fixed
+- bandit findings introduced by managed Neo4j bootstrap were fixed
+
+### Validation
+- `python -m pytest tests -q` → `461 passed`
+- `uv run mypy src/` → pass
+- `uv run bandit -r src/ -q` → pass
 
 ## [0.1.0] - 2026-01-21
 
 ### Added
+- Initial layered architecture (tools, services, repositories, models, utils)
+- Dual repository abstraction for Neo4j and SQLite
+- State and transition tracking foundations
+- Core MCP operations for state creation, inspection, search, and transition lookup
+- Input validation, audit logging, and rate limiting foundations
+- Initial Docker and development tooling
 
-- **Core Architecture**
-  - Clean Architecture with layered structure (tools, services, repositories, models, utils)
-  - Abstract base classes for repositories (StateRepository, TransitionRepository)
-  - Concrete implementations for Neo4j and SQLite databases
-  - State and Transition data models with serialization
-
-- **Core Tools (MCP)**
-  - `genesis()`: Initialize state machine with state #0
-  - `new_state_transition()`: Automatic state transitions with hashing
-  - `arbitrary_state_transition()`: Jump to any state
-  - `get_current_state_number()`: Get current state number
-  - `get_current_state_info()`: Get full context of current state
-  - `get_state_info()`: Get info for any state
-  - `get_state_transitions()`: Get transitions for a state
-  - `get_transition_info()`: Get transition details
-  - `search_states()`: Full-text search in prompts
-  - `track_transitions()`: Get last 5 transitions
-  - `total_states()`: Get total state count
-
-- **Security**
-  - Input validation and sanitization (CWE-78, CWE-22 mitigation)
-  - Path traversal prevention
-  - OS command injection prevention
-  - Rate limiting support
-  - Defense in depth strategy
-
-- **Performance & Monitoring**
-  - Structured JSON logging
-  - Performance metrics collection
-  - Timer utilities
-  - Performance thresholds monitoring
-
-- **Development Tools**
-  - UV package manager support
-  - Poetry configuration
-  - Comprehensive test suite (144 tests)
-  - Docker containerization
-  - Pre-commit hooks configuration
-
-### Changed
-
-- Updated to Python 3.10+ for type safety
-- Refactored validation utilities for better error messages
-- Improved error handling with specific exception types
-- Transition ID now uses sequential integers instead of UUIDs for clearer state machine representation
-
-### Fixed
-
-- Atomic state transitions with rollback on failure
-- Proper session and state context in logging
-- **Transition ID format**: Transition IDs changed from UUID (e.g., `45008f11-6351-438a-8ebc-83613b7a6379`) to sequential integers (1, 2, 3...) for better traceability and consistent state machine representation
-  - `Transition.transition_id` type changed from `UUID` to `int`
-  - Sequential IDs generated via `transition_repo.count() + 1`
-  - SQLite `TransitionModel.id` column type changed from `String(36)` to `Integer`
-  - Neo4j transition `transition_id` stored as Integer instead of String
-  - `get_by_id()` methods now accept `int` instead of `UUID`
-  - Affected files: `state_model.py`, `abstract_repositories.py`, `neo4j_repository.py`, `sqlite_repository.py`, `state_service.py`
-
-### Security
-
-- Validated all user inputs
-- Sanitized git operations
-- Protected against injection attacks
-
-## [0.0.1] - 2026-01-20
-
-### Added
-
-- Initial project structure
-- Basic Docker configuration
-- Git integration
-
-## TODO
-
-- Add configuration management
-- Add monitoring dashboard
-- Add state export/import
-- Add team collaboration features
-
-[0.1.0]: https://github.com/anomalyco/codebase_state_manager_mcp/compare/v0.0.1...v0.1.0
-[0.0.1]: https://github.com/anomalyco/codebase_state_manager_mcp/releases/tag/v0.0.1

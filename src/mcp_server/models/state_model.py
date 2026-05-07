@@ -31,6 +31,9 @@ class State:
         created_at: Optional[datetime] = None,
         file_hashes: Optional[Dict[str, str]] = None,
         file_hash_deltas: Optional[Dict[str, Optional[str]]] = None,
+        llm_context: Optional[str] = None,
+        compression_version: Optional[str] = None,
+        compacted_at: Optional[datetime] = None,
     ) -> None:
         self.state_number = state_number
         self.user_prompt = user_prompt
@@ -42,6 +45,9 @@ class State:
         # For transition states (1+): store None to save space, reconstruct on-demand
         self.file_hashes = file_hashes
         self.file_hash_deltas = file_hash_deltas or {}
+        self.llm_context = llm_context
+        self.compression_version = compression_version
+        self.compacted_at = compacted_at
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +59,9 @@ class State:
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "file_hashes": self.file_hashes,
             "file_hash_deltas": self.file_hash_deltas,
+            "llm_context": self.llm_context,
+            "compression_version": self.compression_version,
+            "compacted_at": self.compacted_at.isoformat() if self.compacted_at else None,
         }
 
     def get_file_hashes(self, state_service=None):
@@ -85,6 +94,14 @@ class State:
                 created_at = datetime.fromisoformat(data["created_at"])
             else:
                 created_at = data["created_at"]
+
+        compacted_at = None
+        if data.get("compacted_at"):
+            if isinstance(data["compacted_at"], str):
+                compacted_at = datetime.fromisoformat(data["compacted_at"])
+            else:
+                compacted_at = data["compacted_at"]
+
         return cls(
             state_number=data["state_number"],
             user_prompt=data["user_prompt"],
@@ -94,6 +111,9 @@ class State:
             created_at=created_at,
             file_hashes=data.get("file_hashes"),  # Can be None for transition states
             file_hash_deltas=data.get("file_hash_deltas", {}),
+            llm_context=data.get("llm_context"),
+            compression_version=data.get("compression_version"),
+            compacted_at=compacted_at,
         )
 
 
@@ -105,12 +125,14 @@ class Transition:
         next_state: int,
         user_prompt: Optional[str] = None,
         timestamp: Optional[datetime] = None,
+        reward: Optional[float] = None,
     ) -> None:
         self.transition_id = transition_id
         self.current_state = current_state
         self.next_state = next_state
         self.user_prompt = user_prompt
         self.timestamp = timestamp or now_utc()
+        self.reward = reward
 
     def to_dict(self) -> dict:
         return {
@@ -119,6 +141,7 @@ class Transition:
             "next_state": self.next_state,
             "user_prompt": self.user_prompt,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "reward": self.reward,
         }
 
     @classmethod
@@ -140,4 +163,5 @@ class Transition:
             next_state=data["next_state"],
             user_prompt=data.get("user_prompt"),
             timestamp=timestamp,
+            reward=data.get("reward"),
         )

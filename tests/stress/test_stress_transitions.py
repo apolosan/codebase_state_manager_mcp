@@ -16,6 +16,7 @@ class MockStateRepository:
         self.states = {}
         self._current = None
         self._max_state_number = -1
+        self.metadata = {}
 
     def create(self, state: State) -> bool:
         self.states[state.state_number] = state
@@ -69,6 +70,13 @@ class MockStateRepository:
         self._current = self.states[state_number]
         return True
 
+    def get_metadata(self, key: str):
+        return self.metadata.get(key)
+
+    def set_metadata(self, key: str, value: str) -> bool:
+        self.metadata[key] = value
+        return True
+
 
 class MockTransitionRepository:
     def __init__(self):
@@ -115,6 +123,7 @@ class TestStressTransitions:
             '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
             {},
         )
+        manager.get_directory_hashes.return_value = {}
         return manager
 
     @pytest.fixture

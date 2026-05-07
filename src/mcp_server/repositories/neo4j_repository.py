@@ -9,6 +9,29 @@ from ..models.state_model import State, Transition
 from ..repositories.abstract_repositories import StateRepository, TransitionRepository
 from ..utils.hash import generate_state_hash
 
+STATE_PROPERTY_NAMES = {
+    "state_number",
+    "user_prompt",
+    "branch_name",
+    "git_diff_info",
+    "hash",
+    "created_at",
+    "file_hashes",
+    "file_hash_deltas",
+    "llm_context",
+    "compression_version",
+    "compacted_at",
+}
+
+TRANSITION_PROPERTY_NAMES = {
+    "transition_id",
+    "current_state",
+    "next_state",
+    "user_prompt",
+    "timestamp",
+    "reward",
+}
+
 
 class Neo4jStateRepository(StateRepository):
     def __init__(self, driver: Driver, settings: Settings) -> None:
@@ -31,12 +54,15 @@ class Neo4jStateRepository(StateRepository):
                     MERGE (s:State {state_number: $state_number})
                     SET s.user_prompt = $user_prompt,
                         s.branch_name = $branch_name,
-                     s.git_diff_info = $git_diff_info,
-                         s.hash = $hash,
-                         s.created_at = $created_at,
-                         s.file_hashes = $file_hashes,
-                         s.file_hash_deltas = $file_hash_deltas
-                     RETURN s
+                        s.git_diff_info = $git_diff_info,
+                        s.hash = $hash,
+                        s.created_at = $created_at,
+                        s.file_hashes = $file_hashes,
+                        s.file_hash_deltas = $file_hash_deltas,
+                        s.llm_context = $llm_context,
+                        s.compression_version = $compression_version,
+                        s.compacted_at = $compacted_at
+                    RETURN s
                     """,
                     state_number=state.state_number,
                     user_prompt=state.user_prompt,
@@ -48,6 +74,9 @@ class Neo4jStateRepository(StateRepository):
                     file_hash_deltas=(
                         json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
                     ),
+                    llm_context=state.llm_context,
+                    compression_version=state.compression_version,
+                    compacted_at=state.compacted_at.isoformat() if state.compacted_at else None,
                 )
                 return result.single() is not None
             except Exception:
@@ -92,6 +121,13 @@ class Neo4jStateRepository(StateRepository):
                     ),
                     file_hashes=file_hashes,
                     file_hash_deltas=file_hash_deltas,
+                    llm_context=s.get("llm_context"),
+                    compression_version=s.get("compression_version"),
+                    compacted_at=(
+                        datetime.fromisoformat(s["compacted_at"])
+                        if s.get("compacted_at")
+                        else None
+                    ),
                 )
             return None
 
@@ -111,7 +147,7 @@ class Neo4jStateRepository(StateRepository):
                 RETURN MAX(sn) AS max_state
                 """)
             record = result.single()
-            if record and record["max_state"]:
+            if record and record["max_state"] is not None:
                 return self.get_by_number(record["max_state"])
             return None
 
@@ -149,6 +185,13 @@ class Neo4jStateRepository(StateRepository):
                         ),
                         file_hashes=file_hashes,
                         file_hash_deltas=file_hash_deltas,
+                        llm_context=s.get("llm_context"),
+                        compression_version=s.get("compression_version"),
+                        compacted_at=(
+                            datetime.fromisoformat(s["compacted_at"])
+                            if s.get("compacted_at")
+                            else None
+                        ),
                     )
                 )
             return states
@@ -232,7 +275,10 @@ class Neo4jStateRepository(StateRepository):
                             git_diff_info: $git_diff_info,
                             hash: $hash,
                             created_at: $created_at,
-                            file_hash_deltas: $file_hash_deltas
+                            file_hash_deltas: $file_hash_deltas,
+                            llm_context: $llm_context,
+                            compression_version: $compression_version,
+                            compacted_at: $compacted_at
                         })
                         RETURN new.state_number AS state_number
                         """,
@@ -245,6 +291,9 @@ class Neo4jStateRepository(StateRepository):
                         file_hash_deltas=(
                             json.dumps(state.file_hash_deltas) if state.file_hash_deltas else None
                         ),
+                        llm_context=state.llm_context,
+                        compression_version=state.compression_version,
+                        compacted_at=state.compacted_at.isoformat() if state.compacted_at else None,
                     )
                     record = result.single()
                     if record:
@@ -322,6 +371,21 @@ class Neo4jTransitionRepository(TransitionRepository):
         self.driver = driver
         self.settings = settings
 
+    def _build_transition(self, record) -> Transition:
+        transition_data = record["t"]
+        return Transition(
+            transition_id=transition_data.get("transition_id", 0),
+            current_state=record.get("current_state", 0),
+            next_state=record.get("next_state", 0),
+            user_prompt=transition_data.get("user_prompt"),
+            timestamp=(
+                datetime.fromisoformat(transition_data["timestamp"])
+                if transition_data.get("timestamp")
+                else None
+            ),
+            reward=transition_data.get("reward"),
+        )
+
     def create(self, transition: Transition) -> bool:
         with self.driver.session() as session:
             try:
@@ -332,7 +396,8 @@ class Neo4jTransitionRepository(TransitionRepository):
                     CREATE (from)-[t:TRANSITION {
                         transition_id: $transition_id,
                         user_prompt: $user_prompt,
-                        timestamp: $timestamp
+                        timestamp: $timestamp,
+                        reward: $reward
                     }]->(to)
                     RETURN t
                     """,
@@ -341,6 +406,7 @@ class Neo4jTransitionRepository(TransitionRepository):
                     next_state=transition.next_state,
                     user_prompt=transition.user_prompt,
                     timestamp=transition.timestamp.isoformat() if transition.timestamp else None,
+                    reward=transition.reward,
                 )
                 return result.single() is not None
             except Exception:
@@ -372,7 +438,8 @@ class Neo4jTransitionRepository(TransitionRepository):
             CREATE (from)-[t:TRANSITION {
                 transition_id: $transition_id,
                 user_prompt: $user_prompt,
-                timestamp: $timestamp
+                timestamp: $timestamp,
+                reward: $reward
             }]->(to)
             RETURN t
             """,
@@ -381,6 +448,7 @@ class Neo4jTransitionRepository(TransitionRepository):
             next_state=transition.next_state,
             user_prompt=transition.user_prompt,
             timestamp=transition.timestamp.isoformat() if transition.timestamp else None,
+            reward=transition.reward,
         )
         if result.single():
             # Update the transition object with the new ID
@@ -399,16 +467,7 @@ class Neo4jTransitionRepository(TransitionRepository):
             )
             record = result.single()
             if record:
-                t = record["t"]
-                return Transition(
-                    transition_id=t.get("transition_id", 0),
-                    current_state=record["current_state"],
-                    next_state=record["next_state"],
-                    user_prompt=t.get("user_prompt"),
-                    timestamp=(
-                        datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None
-                    ),
-                )
+                return self._build_transition(record)
             return None
 
     def get_by_state(self, state_number: int) -> List[Transition]:
@@ -423,49 +482,25 @@ class Neo4jTransitionRepository(TransitionRepository):
             )
             transitions = []
             for record in result:
-                t = record["t"]
-                if t:
-                    transitions.append(
-                        Transition(
-                            transition_id=t.get("transition_id", 0),
-                            current_state=record["current_state"],
-                            next_state=record["next_state"],
-                            user_prompt=t.get("user_prompt"),
-                            timestamp=(
-                                datetime.fromisoformat(t["timestamp"])
-                                if t.get("timestamp")
-                                else None
-                            ),
-                        )
-                    )
+                if record["t"]:
+                    transitions.append(self._build_transition(record))
             return transitions
 
     def get_last(self, limit: int) -> List[Transition]:
         with self.driver.session() as session:
             result = session.run(
                 """
-                MATCH ()-[t:TRANSITION]->()
-                WITH t
+                MATCH (from:State)-[t:TRANSITION]->(to:State)
+                WITH t, from, to
                 ORDER BY t.timestamp DESC
                 LIMIT $limit
-                RETURN t
+                RETURN t, from.state_number AS current_state, to.state_number AS next_state
                 """,
                 limit=limit,
             )
             transitions = []
             for record in result:
-                t = record["t"]
-                transitions.append(
-                    Transition(
-                        transition_id=t.get("transition_id", 0),
-                        current_state=0,
-                        next_state=0,
-                        user_prompt=t.get("user_prompt"),
-                        timestamp=(
-                            datetime.fromisoformat(t["timestamp"]) if t.get("timestamp") else None
-                        ),
-                    )
-                )
+                transitions.append(self._build_transition(record))
             return transitions
 
     def count(self) -> int:
@@ -474,14 +509,73 @@ class Neo4jTransitionRepository(TransitionRepository):
             record = result.single()
             return int(record["count"]) if record else 0
 
+    def delete(self, transition_id: int) -> bool:
+        with self.driver.session() as session:
+            try:
+                result = session.run(
+                    """
+                    MATCH ()-[t:TRANSITION {transition_id: $transition_id}]->()
+                    WITH t
+                    DELETE t
+                    RETURN 1 AS deleted
+                    """,
+                    transition_id=transition_id,
+                )
+                return result.single() is not None
+            except Exception:
+                return False
+
+    def get_rewarded(self) -> List[Transition]:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (from:State)-[t:TRANSITION]->(to:State)
+                WHERE t.reward IS NOT NULL
+                RETURN t, from.state_number AS current_state, to.state_number AS next_state
+                ORDER BY t.transition_id
+                """
+            )
+            return [self._build_transition(record) for record in result]
+
+    def get_by_state_pair(self, current_state: int, next_state: int) -> List[Transition]:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (from:State {state_number: $current_state})-[t:TRANSITION]->
+                      (to:State {state_number: $next_state})
+                RETURN t, from.state_number AS current_state, to.state_number AS next_state
+                ORDER BY t.transition_id
+                """,
+                current_state=current_state,
+                next_state=next_state,
+            )
+            return [self._build_transition(record) for record in result]
+
+    def update_reward(self, transition_id: int, reward: float | None) -> bool:
+        with self.driver.session() as session:
+            try:
+                result = session.run(
+                    """
+                    MATCH ()-[t:TRANSITION {transition_id: $transition_id}]->()
+                    SET t.reward = $reward
+                    RETURN t
+                    """,
+                    transition_id=transition_id,
+                    reward=reward,
+                )
+                return result.single() is not None
+            except Exception:
+                return False
+
 
 def create_neo4j_repositories(
     uri: str, user: str, password: str, settings: Settings
 ) -> tuple[Neo4jStateRepository, Neo4jTransitionRepository]:
     connection_timeout_ms = settings.neo4j_connection_timeout * 1000
+    auth = (user, password) if settings.neo4j_auth_enabled else None
     driver = GraphDatabase.driver(
         uri,
-        auth=(user, password),
+        auth=auth,
         connection_timeout=connection_timeout_ms,
         max_connection_lifetime=3600 * 1000,
     )

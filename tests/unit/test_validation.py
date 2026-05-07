@@ -9,8 +9,10 @@ from src.mcp_server.utils.validation import (
     sanitize_for_json,
     sanitize_prompt,
     validate_diff_info,
+    validate_llm_context,
     validate_path,
     validate_rate_limit_params,
+    validate_reward,
     validate_search_text,
     validate_state_number,
     validate_state_range,
@@ -350,3 +352,49 @@ class TestValidateVolumePath:
         """Test invalid type raises error."""
         with pytest.raises((ValidationError, TypeError)):
             validate_volume_path(None)
+
+
+class TestValidateReward:
+    """Tests for validate_reward function."""
+
+    def test_none_reward_is_allowed(self):
+        assert validate_reward(None) is None
+
+    def test_reward_accepts_boundary_values(self):
+        assert validate_reward(-10.0) == -10.0
+        assert validate_reward(10.0) == 10.0
+
+    @pytest.mark.parametrize("value", [-10.01, 10.01, float("nan"), float("inf"), "7"])
+    def test_reward_rejects_invalid_values(self, value):
+        with pytest.raises(ValidationError):
+            validate_reward(value)
+
+
+class TestValidateLlmContext:
+    """Tests for validate_llm_context function."""
+
+    VALID_CONTEXT = (
+        '{"v":"scc-e:v1","d":[{"p":1,"a":"M","s":42}],"h":[{"i":1,"h":"abc123=="}]}'
+    )
+
+    def test_none_context_is_allowed(self):
+        assert validate_llm_context(None) is None
+
+    def test_valid_context_passes(self):
+        assert validate_llm_context(self.VALID_CONTEXT) == self.VALID_CONTEXT
+
+    def test_missing_version_is_rejected(self):
+        with pytest.raises(ValidationError):
+            validate_llm_context('{"d":[],"h":[]}')
+
+    def test_wrong_version_is_rejected(self):
+        with pytest.raises(ValidationError):
+            validate_llm_context('{"v":"scc-e:v2","d":[],"h":[]}')
+
+    def test_unknown_top_level_key_is_rejected(self):
+        with pytest.raises(ValidationError):
+            validate_llm_context('{"v":"scc-e:v1","d":[],"h":[],"extra":true}')
+
+    def test_empty_arrays_are_allowed(self):
+        payload = '{"v":"scc-e:v1","d":[],"h":[]}'
+        assert validate_llm_context(payload) == payload

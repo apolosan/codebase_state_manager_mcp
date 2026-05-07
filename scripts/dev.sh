@@ -30,6 +30,10 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
 show_help() {
     cat << EOF
 Codebase State Manager - Development Runner
@@ -41,14 +45,16 @@ Options:
     --help      Mostrar esta mensagem
 
 Environment Variables:
-    NEO4J_URI       URI do Neo4j (default: bolt://localhost:7687)
-    NEO4J_USER      Usuário do Neo4j (default: neo4j)
-    NEO4J_PASSWORD  Senha do Neo4j (default: password)
-    DATABASE_URL    URL do SQLite (fallback)
+    DB_MODE                neo4j (default) ou sqlite
+    NEO4J_BOOTSTRAP_MODE   auto (default) ou external
+    NEO4J_URI              URI do Neo4j externo (quando external)
+    NEO4J_USER             Usuário do Neo4j externo (quando external)
+    NEO4J_PASSWORD         Senha do Neo4j externo (quando external)
 
 Examples:
-    $0                      # Executar normalmente
-    NEO4J_URI=bolt://localhost:7687 $0   # Neo4j customizado
+    $0                                      # Executar normalmente
+    DB_MODE=sqlite $0                       # Forçar SQLite
+    NEO4J_BOOTSTRAP_MODE=external $0        # Usar Neo4j externo
 
 Para mais informações sobre uv, consulte: https://docs.astral.sh/uv/
 EOF

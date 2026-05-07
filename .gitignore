@@ -69,7 +69,8 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+docs/
+docs/*
 
 # PyBuilder
 target/
@@ -197,6 +198,8 @@ volumes/
 .aim/
 .opencode/
 .agent/
+.agent/*
+.agent/*.md
 
 .data/
 data/

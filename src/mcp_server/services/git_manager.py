@@ -726,8 +726,22 @@ class GitManager:
         return diff_info, delta_hashes  # type: ignore[return-value]
 
     def sync_project_to_volume(
-        self, source_path: Path, volume_path: Path, sync_git: bool = True
+        self,
+        source_path: Path,
+        volume_path: Path,
+        sync_git: bool = True,
+        ignore_manager: Optional["IgnoreManager"] = None,
     ) -> bool:
         """Sync project files to volume."""
-        # TODO: Implement proper sync
-        return True
+        try:
+            if volume_path.exists():
+                shutil.rmtree(volume_path)
+
+            if not self.clone_to_volume(source_path, volume_path, ignore_manager=ignore_manager):
+                return False
+
+            source_hashes = self.get_directory_hashes(source_path, ignore_manager=ignore_manager)
+            target_hashes = self.get_directory_hashes(volume_path, ignore_manager=ignore_manager)
+            return source_hashes == target_hashes
+        except (OSError, shutil.Error):
+            return False

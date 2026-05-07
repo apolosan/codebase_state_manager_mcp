@@ -6,7 +6,8 @@ They can be run with:
   pytest tests/integration/test_sqlite_repository.py -v
 """
 
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -195,6 +196,94 @@ class TestSQLiteStateRepository:
         assert state_repo.set_metadata("managed_project_path", "/tmp/radoc") is True
         assert state_repo.get_metadata("managed_project_path") == "/tmp/radoc"
 
+    def test_create_state_persists_compaction_fields(self, sqlite_repos):
+        """Test that SCC-E state fields round-trip through SQLite."""
+        state_repo, _ = sqlite_repos
+        compacted_at = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+
+        state = State(
+            state_number=7,
+            user_prompt="Compacted state",
+            branch_name="main",
+            git_diff_info="diff",
+            hash="hash7",
+            llm_context='{"v":"scc-e:v1","d":[],"h":[]}',
+            compression_version="scc-e:v1",
+            compacted_at=compacted_at,
+        )
+
+        assert state_repo.create(state) is True
+
+        retrieved = state_repo.get_by_number(7)
+        assert retrieved is not None
+        assert retrieved.llm_context == '{"v":"scc-e:v1","d":[],"h":[]}'
+        assert retrieved.compression_version == "scc-e:v1"
+        assert retrieved.compacted_at == compacted_at
+
+    def test_schema_upgrade_adds_compaction_and_reward_columns(self, settings):
+        """Test old SQLite schemas are upgraded in-place without data loss."""
+        with sqlite3.connect(settings.sqlite_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE states (
+                    state_number INTEGER PRIMARY KEY,
+                    user_prompt TEXT NOT NULL,
+                    branch_name VARCHAR(255) NOT NULL,
+                    git_diff_info TEXT,
+                    hash VARCHAR(64) NOT NULL UNIQUE,
+                    created_at DATETIME,
+                    file_hashes TEXT,
+                    file_hash_deltas TEXT
+                );
+                CREATE TABLE metadata (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value VARCHAR(255) NOT NULL
+                );
+                CREATE TABLE transitions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    current_state INTEGER NOT NULL,
+                    next_state INTEGER NOT NULL,
+                    user_prompt TEXT,
+                    timestamp DATETIME
+                );
+                INSERT INTO states (
+                    state_number,
+                    user_prompt,
+                    branch_name,
+                    git_diff_info,
+                    hash,
+                    created_at
+                ) VALUES (0, 'Genesis', 'main', '', 'hash0', '2026-05-06T12:00:00+00:00');
+                INSERT INTO transitions (
+                    current_state,
+                    next_state,
+                    user_prompt,
+                    timestamp
+                ) VALUES (0, 1, 'Initial transition', '2026-05-06T12:05:00+00:00');
+                """
+            )
+
+        state_repo, transition_repo = create_sqlite_repositories(
+            path=settings.sqlite_path,
+            settings=settings,
+        )
+
+        with sqlite3.connect(settings.sqlite_path) as connection:
+            state_columns = {row[1] for row in connection.execute("PRAGMA table_info(states)")}
+            transition_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(transitions)")
+            }
+
+        assert {"llm_context", "compression_version", "compacted_at"}.issubset(state_columns)
+        assert {"reward"}.issubset(transition_columns)
+
+        recovered_state = state_repo.get_by_number(0)
+        recovered_transition = transition_repo.get_by_id(1)
+        assert recovered_state is not None
+        assert recovered_state.user_prompt == "Genesis"
+        assert recovered_transition is not None
+        assert recovered_transition.user_prompt == "Initial transition"
+
 
 class TestSQLiteTransitionRepository:
     """Integration tests for SQLite Transition Repository."""
@@ -287,6 +376,81 @@ class TestSQLiteTransitionRepository:
 
         last = transition_repo.get_last(3)
         assert len(last) == 3
+
+    def test_delete_transition_removes_record(self, sqlite_repos):
+        """Test deleting a transition by ID."""
+        _, transition_repo = sqlite_repos
+        transition = Transition(
+            transition_id=11,
+            current_state=0,
+            next_state=1,
+            user_prompt="Delete me",
+        )
+
+        assert transition_repo.create(transition) is True
+        assert transition_repo.delete(11) is True
+        assert transition_repo.get_by_id(11) is None
+
+    def test_get_rewarded_returns_only_rewarded_transitions(self, sqlite_repos):
+        """Test filtering transitions with reward values."""
+        _, transition_repo = sqlite_repos
+        transition_repo.create(
+            Transition(
+                transition_id=21,
+                current_state=0,
+                next_state=1,
+                user_prompt="rewarded",
+                reward=8.5,
+            )
+        )
+        transition_repo.create(
+            Transition(
+                transition_id=22,
+                current_state=1,
+                next_state=2,
+                user_prompt="plain",
+            )
+        )
+
+        rewarded = transition_repo.get_rewarded()
+
+        assert [transition.transition_id for transition in rewarded] == [21]
+        assert rewarded[0].reward == 8.5
+
+    def test_get_by_state_pair_returns_all_matches(self, sqlite_repos):
+        """Test getting transitions by current/next state pair."""
+        _, transition_repo = sqlite_repos
+        transition_repo.create(
+            Transition(transition_id=31, current_state=2, next_state=3, user_prompt="first")
+        )
+        transition_repo.create(
+            Transition(transition_id=32, current_state=2, next_state=3, user_prompt="second")
+        )
+        transition_repo.create(
+            Transition(transition_id=33, current_state=3, next_state=4, user_prompt="other")
+        )
+
+        matches = transition_repo.get_by_state_pair(2, 3)
+
+        assert [transition.transition_id for transition in matches] == [31, 32]
+
+    def test_update_reward_persists_value(self, sqlite_repos):
+        """Test updating a transition reward in place."""
+        _, transition_repo = sqlite_repos
+        transition_repo.create(
+            Transition(
+                transition_id=41,
+                current_state=4,
+                next_state=5,
+                user_prompt="re-score me",
+            )
+        )
+
+        assert transition_repo.update_reward(41, 4.0) is True
+
+        updated = transition_repo.get_by_id(41)
+        assert updated is not None
+        assert updated.reward == 4.0
 
 
 class TestSQLiteIntegrationWorkflow:

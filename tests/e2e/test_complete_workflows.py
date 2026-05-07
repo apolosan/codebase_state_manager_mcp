@@ -16,6 +16,7 @@ class MockStateRepository:
         self.states = {}
         self._initialized = False
         self._current_state = None
+        self.metadata = {}
 
     def create(self, state):
         self.states[state.state_number] = state
@@ -66,6 +67,13 @@ class MockStateRepository:
         if state_number not in self.states:
             return False
         self._current_state = state_number
+        return True
+
+    def get_metadata(self, key: str):
+        return self.metadata.get(key)
+
+    def set_metadata(self, key: str, value: str) -> bool:
+        self.metadata[key] = value
         return True
 
 
@@ -134,6 +142,7 @@ class TestCompleteWorkflows:
             '{"added": [], "modified": [], "deleted": [], "content_diffs": {}}',
             {},
         )
+        manager.get_directory_hashes.return_value = {}
         return manager
 
     @pytest.fixture
@@ -340,6 +349,24 @@ class TestMCPToolsIntegration:
         assert result["success"] is True
         assert "state" in result
 
+    def test_get_current_state_info_tool_supports_compact_representation(
+        self, state_service, settings, tmp_path
+    ):
+        """Test compact state output from get_current_state_info tool."""
+        from src.mcp_server.tools import get_current_state_info
+
+        project_path = str(tmp_path / "project")
+        volume_path = str(tmp_path / "volume")
+        Path(project_path).mkdir()
+
+        state_service.genesis(project_path, volume_path)
+
+        result = get_current_state_info(state_service, state_representation="compact")
+
+        assert result["success"] is True
+        assert result["state"]["compression_version"] == "scc-e:v1"
+        assert result["state"]["llm_context"] is not None
+
     def test_total_states_tool(self, state_service, settings, tmp_path):
         """Test total_states tool."""
         from src.mcp_server.tools import total_states
@@ -392,6 +419,45 @@ class TestMCPToolsIntegration:
         assert "success" in result
         assert "transitions" in result
         assert len(result["transitions"]) == 1
+
+    def test_get_current_state_compact_context_tool(self, state_service, settings, tmp_path):
+        """Test compact preview tool."""
+        from src.mcp_server.tools import get_current_state_compact_context, total_states
+
+        project_path = str(tmp_path / "project")
+        volume_path = str(tmp_path / "volume")
+        Path(project_path).mkdir()
+
+        state_service.genesis(project_path, volume_path)
+        before = total_states(state_service)["total_states"]
+
+        result = get_current_state_compact_context(state_service, include_vocabulary=True)
+        after = total_states(state_service)["total_states"]
+
+        assert result["success"] is True
+        assert result["preview"]["compression_version"] == "scc-e:v1"
+        assert result["preview"]["persisted"] is False
+        assert result["preview"]["vocabulary"] is not None
+        assert before == after
+
+    def test_get_compact_states_tool_returns_generation_reward(self, state_service, settings, tmp_path):
+        """Test compact state retrieval with the generation reward attached."""
+        from src.mcp_server.tools import get_compact_states
+
+        project_path = str(tmp_path / "project")
+        volume_path = str(tmp_path / "volume")
+        Path(project_path).mkdir()
+
+        state_service.genesis(project_path, volume_path)
+        state_service.new_state_transition("Rewarded compact state", reward=6.0)
+
+        result = get_compact_states(state_service, state=1)
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["states"][0]["state_number"] == 1
+        assert result["states"][0]["llm_context"] is not None
+        assert result["states"][0]["reward"] == 6.0
 
 
 class TestSecurityWorkflows:
