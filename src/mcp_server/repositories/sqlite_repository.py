@@ -592,6 +592,6 @@ def create_sqlite_repositories(
 ) -> tuple[SQLiteStateRepository, SQLiteTransitionRepository]:
     engine = create_sqlite_engine(path)
     session_factory = sessionmaker(bind=engine)
-    return SQLiteStateRepository(session_factory, settings, engine=engine), SQLiteTransitionRepository(
-        session_factory, settings
-    )
+    return SQLiteStateRepository(
+        session_factory, settings, engine=engine
+    ), SQLiteTransitionRepository(session_factory, settings)

@@ -124,9 +124,7 @@ class Neo4jStateRepository(StateRepository):
                     llm_context=s.get("llm_context"),
                     compression_version=s.get("compression_version"),
                     compacted_at=(
-                        datetime.fromisoformat(s["compacted_at"])
-                        if s.get("compacted_at")
-                        else None
+                        datetime.fromisoformat(s["compacted_at"]) if s.get("compacted_at") else None
                     ),
                 )
             return None
@@ -527,14 +525,12 @@ class Neo4jTransitionRepository(TransitionRepository):
 
     def get_rewarded(self) -> List[Transition]:
         with self.driver.session() as session:
-            result = session.run(
-                """
+            result = session.run("""
                 MATCH (from:State)-[t:TRANSITION]->(to:State)
                 WHERE t.reward IS NOT NULL
                 RETURN t, from.state_number AS current_state, to.state_number AS next_state
                 ORDER BY t.transition_id
-                """
-            )
+                """)
             return [self._build_transition(record) for record in result]
 
     def get_by_state_pair(self, current_state: int, next_state: int) -> List[Transition]:

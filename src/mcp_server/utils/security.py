@@ -53,9 +53,7 @@ class RateLimiter:
             requests=5, seconds=60, window_name="arbitrary_transition"
         ),
         "search_states": RateLimitConfig(requests=20, seconds=60, window_name="search"),
-        "get_current_state_number": RateLimitConfig(
-            requests=30, seconds=60, window_name="read"
-        ),
+        "get_current_state_number": RateLimitConfig(requests=30, seconds=60, window_name="read"),
         "get_current_state_info": RateLimitConfig(requests=30, seconds=60, window_name="read"),
         "get_current_state_compact_context": RateLimitConfig(
             requests=30, seconds=60, window_name="read"
@@ -66,9 +64,7 @@ class RateLimiter:
         "total_states": RateLimitConfig(requests=30, seconds=60, window_name="read"),
         "track_transitions": RateLimitConfig(requests=30, seconds=60, window_name="read"),
         "get_state_transitions": RateLimitConfig(requests=30, seconds=60, window_name="read"),
-        "get_rewarded_transitions": RateLimitConfig(
-            requests=30, seconds=60, window_name="read"
-        ),
+        "get_rewarded_transitions": RateLimitConfig(requests=30, seconds=60, window_name="read"),
         "set_transition_reward": RateLimitConfig(
             requests=10, seconds=60, window_name="transition_reward"
         ),

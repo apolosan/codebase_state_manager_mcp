@@ -4,7 +4,6 @@ from typing import Literal
 
 from dotenv import load_dotenv
 
-
 DEFAULT_VOLUME_ROOT = Path("/opt/codebase-state-manager/volumes")
 
 
@@ -109,8 +108,7 @@ class Settings:
             neo4j_bootstrap_mode: Literal["auto", "external"] = neo4j_bootstrap_mode_raw  # type: ignore[assignment]
         else:
             explicit_neo4j_config = any(
-                value is not None
-                for value in (neo4j_uri_env, neo4j_user_env, neo4j_password_env)
+                value is not None for value in (neo4j_uri_env, neo4j_user_env, neo4j_password_env)
             )
             neo4j_bootstrap_mode = "external" if explicit_neo4j_config else "auto"
 

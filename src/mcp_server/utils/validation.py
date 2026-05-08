@@ -392,7 +392,6 @@ def _validate_compact_diff_item(item: object) -> None:
         raise ValidationError("Campo d[].s deve ser inteiro")
 
 
-
 def _validate_compact_hash_item(item: object) -> None:
     if not isinstance(item, dict):
         raise ValidationError("Cada item de h deve ser um objeto JSON")
@@ -408,7 +407,6 @@ def _validate_compact_hash_item(item: object) -> None:
         raise ValidationError("Campo h[].i deve ser inteiro")
     if not isinstance(hash_value, str) or not hash_value:
         raise ValidationError("Campo h[].h deve ser string não vazia")
-
 
 
 def validate_llm_context(value: str | None) -> str | None:

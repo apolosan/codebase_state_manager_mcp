@@ -31,9 +31,7 @@ def _validate_state_representation(state_representation: str) -> dict[str, objec
         return None
     return {
         "success": False,
-        "message": (
-            "Invalid state_representation. Expected one of: raw, compact, both"
-        ),
+        "message": ("Invalid state_representation. Expected one of: raw, compact, both"),
     }
 
 

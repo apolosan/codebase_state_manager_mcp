@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-import docker
 from docker.client import DockerClient
 from docker.errors import DockerException
 from docker.models.containers import Container
 from neo4j import GraphDatabase
+
+import docker
 
 from ..config import Settings
 
