@@ -90,6 +90,22 @@ This mode does **not** require:
 - `NEO4J_USER`
 - `NEO4J_PASSWORD`
 
+### Note: `uv --project` vs managed codebase
+
+In editor MCP configs, `uv run --project ...` selects the **Python environment**
+used to run this MCP server. It is not the codebase being managed.
+
+If you want to manage a different codebase directory (for example, the repo you are
+actively editing), set:
+
+```json
+{
+  "env": {
+    "MANAGED_PROJECT_PATH": "/absolute/path/to/your/codebase"
+  }
+}
+```
+
 ---
 
 ## 5. Optional runtime modes

@@ -124,6 +124,18 @@ The alias still works, but the canonical launcher is now `run_mcp_server.py`.
 
 Nothing else is required for Neo4j in this mode.
 
+### 5.1.1 Important: `uv --project` is the server environment, not the managed codebase
+
+The `--project` flag passed to `uv run` controls **which Python project/environment**
+is used to resolve and install dependencies for the MCP server process.
+
+It is **not** the codebase being managed.
+
+- Use `--project /absolute/path/to/codebase_state_manager_mcp` so the server runs with its
+  own dependencies installed.
+- Configure the *managed codebase* explicitly via `MANAGED_PROJECT_PATH` (below), or by
+  starting the server with the managed codebase as the current working directory.
+
 ### 5.2 SQLite mode
 
 ```json
@@ -194,6 +206,23 @@ SQLITE_PATH=./data/state_manager.db
 ```
 
 If `VOLUME_PATH` is omitted, the server automatically falls back to `/opt/codebase-state-manager/volumes/<current-project-dir-name>` so the managed snapshot stays outside the project tree.
+
+### Managed codebase selection
+
+The server needs to know which codebase directory it is managing. It resolves the managed
+project path in this order:
+
+1. `MANAGED_PROJECT_PATH` (environment variable)
+2. persisted metadata in the repository backend (when available)
+3. tool-provided project path (for tool calls that accept it)
+4. the service's current in-memory project path
+
+To force the managed project to be a specific directory (recommended for editor integrations),
+set:
+
+```bash
+MANAGED_PROJECT_PATH=/absolute/path/to/your/codebase
+```
 
 ### Managed Neo4j
 

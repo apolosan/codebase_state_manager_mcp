@@ -15,13 +15,9 @@ sys.path.insert(0, str(project_root))
 
 def main() -> None:
     """Main entry point for the MCP server."""
-    from neo4j.exceptions import ServiceUnavailable, SessionExpired
-
     from src.mcp_server.config import Settings, get_settings
-    from src.mcp_server.repositories.neo4j_repository import create_neo4j_repositories
     from src.mcp_server.repositories.sqlite_repository import create_sqlite_repositories
     from src.mcp_server.services.git_manager import GitManager
-    from src.mcp_server.services.neo4j_bootstrap import prepare_neo4j_connection
     from src.mcp_server.services.state_service import StateService
     from src.mcp_server.tools import mcp_tools
     from src.mcp_server.utils.audit import get_audit_logger
@@ -53,21 +49,36 @@ def main() -> None:
 
     if settings.db_mode == "neo4j":
         try:
-            settings = prepare_neo4j_connection(settings)
-            state_repo, transition_repo = create_neo4j_repositories(
-                uri=settings.neo4j_uri,
-                user=settings.neo4j_user,
-                password=settings.neo4j_password,
-                settings=settings,
-            )
-            logger.info(f"Connected to Neo4j at {settings.neo4j_uri}")
-        except (ServiceUnavailable, SessionExpired, Exception) as e:
-            logger.warning(f"Neo4j connection failed: {e}. Falling back to SQLite.")
+            from neo4j.exceptions import ServiceUnavailable, SessionExpired
+        except Exception as e:
+            logger.warning(f"Neo4j driver not available ({e}). Falling back to SQLite.")
             state_repo, transition_repo = create_sqlite_repositories(
                 path=settings.sqlite_path,
                 settings=settings,
             )
             logger.info(f"Using SQLite at {settings.sqlite_path}")
+        else:
+            try:
+                from src.mcp_server.repositories.neo4j_repository import (
+                    create_neo4j_repositories,
+                )
+                from src.mcp_server.services.neo4j_bootstrap import prepare_neo4j_connection
+
+                settings = prepare_neo4j_connection(settings)
+                state_repo, transition_repo = create_neo4j_repositories(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                    settings=settings,
+                )
+                logger.info(f"Connected to Neo4j at {settings.neo4j_uri}")
+            except (ServiceUnavailable, SessionExpired, Exception) as e:
+                logger.warning(f"Neo4j connection failed: {e}. Falling back to SQLite.")
+                state_repo, transition_repo = create_sqlite_repositories(
+                    path=settings.sqlite_path,
+                    settings=settings,
+                )
+                logger.info(f"Using SQLite at {settings.sqlite_path}")
     else:
         state_repo, transition_repo = create_sqlite_repositories(
             path=settings.sqlite_path,

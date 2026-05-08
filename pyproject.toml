@@ -50,9 +50,6 @@ dev = [
     "isort>=5.13.2",
 ]
 
-[tool.uv]
-dev-dependencies = ["pytest>=8.3.3", "pytest-cov>=6.0.0", "bandit>=1.7.9", "docker>=7.1.0", "mypy>=1.14.0", "black>=24.10.0", "isort>=5.13.2"]
-
 [tool.black]
 line-length = 100
 target-version = ['py310']
