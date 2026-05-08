@@ -5,7 +5,7 @@ This document describes the **current** architecture of version **0.2.1** of the
 It reflects the code as implemented today, including:
 - managed Neo4j bootstrap;
 - SQLite support;
-- SCC-E compact state representation;
+- SCC-E (State Compression Code — Embedding) compact state representation;
 - rewarded transitions;
 - FastMCP-exposed tools.
 
@@ -19,7 +19,7 @@ A state captures:
 - the prompt that motivated a change;
 - branch and diff information;
 - file-hash snapshots or deltas;
-- compact SCC-E context for LLM consumption.
+- compact SCC-E (State Compression Code — Embedding) context for LLM consumption.
 
 A transition captures:
 - the source state;
@@ -397,6 +397,12 @@ Both map to the same domain field: `Transition.transition_id`.
 ---
 
 ## 10. SCC-E Architecture
+
+In the terminology of this project:
+- **SCC** means **State Compression Code** — the broader idea of turning verbose state history into a smaller, model-friendly representation.
+- **SCC-E** means **State Compression Code — Embedding** — the concrete LLM-facing codec that the current codebase implements.
+
+This distinction matters because the earlier design notes discuss SCC as a general compression family and a simpler baseline, while the running project persists **SCC-E** specifically as compact state context for agents.
 
 Primary file:
 - `src/mcp_server/services/scc_codec.py`

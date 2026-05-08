@@ -246,21 +246,43 @@ class ProjectNeo4jServiceManager:
             image=runtime_state.image,
         )
 
+    def _connectivity_probe_timeout(self, remaining_seconds: float) -> float:
+        configured_timeout = float(self.settings.neo4j_connection_timeout)
+        return max(0.5, min(5.0, configured_timeout, remaining_seconds))
+
     def _wait_until_ready(self, connection: ManagedNeo4jConnection) -> None:
-        deadline = time.time() + self.settings.neo4j_connection_timeout
-        while time.time() < deadline:
+        deadline = time.monotonic() + self.settings.neo4j_connection_timeout
+        last_error: Exception | None = None
+
+        while True:
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                break
+
+            probe_timeout = self._connectivity_probe_timeout(remaining_seconds)
             try:
-                driver = GraphDatabase.driver(connection.uri, auth=None)
+                driver = GraphDatabase.driver(
+                    connection.uri,
+                    auth=None,
+                    connection_timeout=probe_timeout,
+                    connection_acquisition_timeout=probe_timeout,
+                )
                 try:
                     driver.verify_connectivity()
                     return
                 finally:
                     driver.close()
-            except Exception:
-                self.sleep_func(1)
+            except Exception as exc:
+                last_error = exc
+                remaining_after_failure = deadline - time.monotonic()
+                if remaining_after_failure <= 0:
+                    break
+                self.sleep_func(min(1.0, remaining_after_failure))
+
+        detail = f" Last error: {last_error}" if last_error is not None else ""
         raise Neo4jServiceError(
             f"Managed Neo4j at {connection.uri} did not become ready within "
-            f"{self.settings.neo4j_connection_timeout}s"
+            f"{self.settings.neo4j_connection_timeout}s.{detail}"
         )
 
     def _find_available_port(self) -> int:

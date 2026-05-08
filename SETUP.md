@@ -285,7 +285,7 @@ Accepted values:
 The server also exposes:
 - `get_current_state_compact_context_tool`
 
-This generates SCC-E preview for the current workspace without creating a new state.
+This generates an SCC-E (State Compression Code — Embedding) preview for the current workspace without creating a new state.
 
 ---
 

@@ -2,10 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This changelog is written for developers building with coding agents, LLM-assisted workflows, and MCP clients. It tracks not only what changed, but why each release matters when you need reliable project state, compact recall, and repeatable repair paths.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Fixed
+- Managed Neo4j bootstrap now uses short connectivity probes during readiness checks instead of long blocking attempts, which reduces flaky startup behavior in real Docker integration runs and reports the last probe error when readiness times out.
 
 ## [0.2.1] - 2026-05-07
+
+### Why this release matters
+
+Version `0.2.1` makes Codebase State Manager much more compelling for agent-driven development. It lowers setup friction with project-scoped managed Neo4j bootstrap, makes recall cheaper for LLM workflows with persisted SCC-E compact context, surfaces reusable success paths through rewarded transitions, and keeps the persistence contract aligned across Neo4j and SQLite.
+
+For teams dealing with recurring AI-generated mistakes, this release moves the project closer to a real memory layer instead of a passive state log.
 
 ### Added
 - Managed Neo4j bootstrap per project, with persistent runtime/data under `./.data/neo4j/`
@@ -48,6 +60,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.1.0] - 2026-01-21
 
+### Why this release mattered
+
+Version `0.1.0` established the foundation: a layered MCP server that could track codebase states and transitions, expose them through tools, and support both Neo4j and SQLite. It gave the project its core shape as persistent infrastructure for code-aware automation.
+
 ### Added
 - Initial layered architecture (tools, services, repositories, models, utils)
 - Dual repository abstraction for Neo4j and SQLite
@@ -55,4 +71,3 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Core MCP operations for state creation, inspection, search, and transition lookup
 - Input validation, audit logging, and rate limiting foundations
 - Initial Docker and development tooling
-
